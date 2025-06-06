@@ -190,15 +190,15 @@ class NukeValidator:
     def _check_file_paths_and_naming(self, nodes: List[nuke.Node]):
         """
         Check file paths (relative/absolute) and naming conventions for Write nodes.
-        Implements dynamic regex checking for naming patterns.
+        Implements dynamic regex checking for naming patterns and per-token validation.
         """
         if 'file_paths' not in self.rules:
             return
 
         path_rules = self.rules['file_paths']
-        # Directly access severity from the specific keys in rules.yaml for file_paths
         severity_relative = path_rules.get('severity_relative_path', 'warning')
         severity_naming = path_rules.get('severity_naming_pattern', 'warning')
+        token_defs = self.rules.get('token_definitions', {})
 
         for node in nodes:
             if node.Class() == 'Write':
@@ -210,15 +210,13 @@ class NukeValidator:
                         'node_type': 'Write',
                         'current': 'None',
                         'expected': 'A valid file path',
-                        'severity': 'error' # Typically an error
+                        'severity': 'error'
                     })
                     continue
 
                 # 1. Check for relative paths
                 if path_rules.get('relative_path_required', False):
                     is_relative = not os.path.isabs(file_path)
-                    # Further check for Nuke-style relative paths if needed (e.g. [python ...])
-                    # For now, os.path.isabs is a good start.
                     if not is_relative:
                         self.issues.append({
                             'type': 'absolute_path_detected',
@@ -228,16 +226,31 @@ class NukeValidator:
                             'expected': 'A relative path',
                             'severity': severity_relative
                         })
-                
                 # 2. Dynamic Naming Convention Check (using regex)
-                # This part needs the dynamic regex generation based on naming_pattern_template
-                # For Stage 1, we'll assume a pre-defined regex if 'naming_pattern_regex' exists.
-                # The full dynamic generation is for Stage 2.
-                if 'naming_pattern_regex' in path_rules:
-                    pattern_str = path_rules['naming_pattern_regex']
-                    filename = os.path.basename(file_path)
-                    try:
-                        if not re.match(pattern_str, filename):
+                pattern_str = path_rules.get('naming_pattern_regex')
+                filename = os.path.basename(file_path)
+                if not pattern_str:
+                    self.issues.append({
+                        'type': 'missing_naming_pattern_regex',
+                        'node': node.name(),
+                        'node_type': 'Write',
+                        'current': filename,
+                        'expected': 'A naming_pattern_regex in rules.yaml',
+                        'severity': 'error'
+                    })
+                    continue
+                try:
+                    print(f"[Validator] Checking filename '{filename}' against regex: {pattern_str}")
+                    if not re.match(pattern_str, filename):
+                        # Per-token validation (advanced logic)
+                        token_issues = self._validate_tokens(filename, token_defs)
+                        if token_issues:
+                            for t_issue in token_issues:
+                                t_issue['node'] = node.name()
+                                t_issue['node_type'] = 'Write'
+                                t_issue['severity'] = severity_naming
+                                self.issues.append(t_issue)
+                        else:
                             self.issues.append({
                                 'type': 'naming_convention_violation',
                                 'node': node.name(),
@@ -246,30 +259,54 @@ class NukeValidator:
                                 'expected': f"To match regex: {pattern_str}",
                                 'severity': severity_naming
                             })
-                    except re.error as e:
-                        self.issues.append({
-                            'type': 'regex_error',
-                            'node': node.name(),
-                            'node_type': 'Write',
-                            'current': f"Regex: {pattern_str}",
-                            'expected': f"Valid regex pattern. Error: {e}",
-                            'severity': 'error'
+                except re.error as e:
+                    self.issues.append({
+                        'type': 'regex_error',
+                        'node': node.name(),
+                        'node_type': 'Write',
+                        'current': f"Regex: {pattern_str}",
+                        'expected': f"Valid regex pattern. Error: {e}",
+                        'severity': 'error'
+                    })
+    def _validate_tokens(self, filename, token_defs):
+        """
+        Validate tokens in the filename using token_definitions from rules.yaml.
+        Returns a list of issues (with type, current, expected, token, and optionally auto_fix info).
+        """
+        issues = []
+        # Example: parse tokens from filename using regexes from token_defs
+        # This assumes tokens are separated by underscores or known delimiters
+        # You may want to make this more robust for your actual template
+        for token, tdef in token_defs.items():
+            regex = tdef.get('regex')
+            if not regex:
+                continue
+            m = re.search(regex, filename)
+            if not m:
+                issues.append({
+                    'type': f'token_{token}_invalid',
+                    'token': token,
+                    'current': filename,
+                    'expected': tdef.get('description', ''),
+                    'auto_fix': tdef.get('auto_fix', False),
+                    'pad_to': tdef.get('pad_to', None),
+                    'tooltip': tdef.get('tooltip', ''),
+                })
+            else:
+                # If padding is required, check it
+                if tdef.get('auto_fix', False) and tdef.get('pad_to'):
+                    val = m.group(0)
+                    if val.isdigit() and len(val) != tdef['pad_to']:
+                        issues.append({
+                            'type': f'token_{token}_padding',
+                            'token': token,
+                            'current': val,
+                            'expected': f"{token} should be zero-padded to {tdef['pad_to']} digits",
+                            'auto_fix': True,
+                            'pad_to': tdef['pad_to'],
+                            'tooltip': tdef.get('tooltip', ''),
                         })
-                # Placeholder for dynamic regex generation based on 'naming_pattern_template'
-                # This will be complex and involve parsing the template and sub-rules.
-                # Example: if 'naming_pattern_template' is "<sequence><shotNumber>..."
-                # self._generate_and_check_dynamic_naming(node, filename, path_rules)
-
-    # Placeholder for the more complex dynamic naming convention logic
-    # def _generate_and_check_dynamic_naming(self, node, filename, path_rules):
-    #     # 1. Get template: path_rules.get('naming_pattern_template')
-    #     # 2. Get token definitions: path_rules.get('naming_tokens', {})
-    #     #    e.g., tokens: { 'sequence': {'type': 'list', 'values': ['AAA', 'BBB'], 'regex_part': '[A-Z]{3}'},
-    #     #                    'shotNumber': {'type': 'regex', 'regex_part': '\d{4}'} }
-    #     # 3. Construct a full regex from the template and token regex_parts.
-    #     # 4. Match filename against the constructed regex.
-    #     # 5. If match, optionally validate individual token values (e.g., sequence is in allowed list).
-    #     pass
+        return issues
     def _check_bounding_boxes(self, nodes: List[nuke.Node]):
         """
         Check bounding boxes for Read and Write nodes
@@ -687,7 +724,7 @@ class NukeValidator:
                             })
     def fix_issues(self):
         """
-        Attempt to fix identified issues
+        Attempt to fix identified issues, including per-token auto-fix.
         """
         fixed = 0
         for issue in self.issues:
@@ -714,7 +751,24 @@ class NukeValidator:
                 new_path = os.path.join(os.path.dirname(current_path), new_filename)
                 node['file'].setValue(new_path)
                 fixed += 1
-                
+            elif issue['type'].startswith('token_') and issue.get('auto_fix'):
+                # Per-token auto-fix (e.g., padding)
+                node = nuke.toNode(issue['node'])
+                file_path = node['file'].value()
+                filename = os.path.basename(file_path)
+                token = issue['token']
+                pad_to = issue.get('pad_to')
+                if pad_to and issue['type'].endswith('_padding'):
+                    # Find the token in the filename and pad it
+                    regex = self.rules['token_definitions'][token]['regex']
+                    m = re.search(regex, filename)
+                    if m:
+                        val = m.group(0)
+                        padded = val.zfill(pad_to)
+                        new_filename = filename.replace(val, padded, 1)
+                        new_path = os.path.join(os.path.dirname(file_path), new_filename)
+                        node['file'].setValue(new_path)
+                        fixed += 1
         return fixed
         
     def generate_report(self) -> str:

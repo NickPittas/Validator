@@ -3,6 +3,7 @@
 
 # File Path and Naming Rules
 file_paths:
+  version: 1.0
   relative_path_required: true # true or false
   severity_relative_path: "warning"
   # Example for dynamic naming convention (regex will be built from this in future)
@@ -24,6 +25,7 @@ file_paths:
 
 # Frame Range and Frame Rate (No changes requested, keeping existing structure if relevant)
 frame_range: # This was for root, keeping for now.
+  version: 1.0
   # min_frames: 10 # Example
   # start_frame: 1001 # Example
   # end_frame: 1100 # Example
@@ -31,6 +33,7 @@ frame_range: # This was for root, keeping for now.
 
 # Node Integrity
 node_integrity:
+  version: 1.0
   check_disabled_nodes: true
   severity_disabled_nodes: "warning"
   # check_unconnected_mandatory_inputs: true # Future addition
@@ -38,11 +41,13 @@ node_integrity:
 
 # Resolution and Aspect Ratio (Now specific to Write Node output)
 write_node_resolution:
+  version: 1.0
   allowed_formats: ["HD_1080", "2K_Super_35_full-ap", "4K_Super_35_full-ap"] # Nuke format names
   severity: "warning"
 
 # Color Space
 colorspaces: # For Read and Write nodes
+  version: 1.0
   Read:
     allowed: ["sRGB", "Rec.709", "ACEScg", "ACES - ACEScg", "Input - sRGB", "Input - Rec.709"] # Add more as needed from dropdown
     severity: "warning"
@@ -54,6 +59,7 @@ colorspaces: # For Read and Write nodes
 
 # Channels and Layer Management (for Write Nodes)
 channels:
+  version: 1.0
   Write:
     require_rgba: true
     warn_on_rgb_only: true
@@ -62,6 +68,7 @@ channels:
 
 # Render Settings (for Write nodes, file type specific)
 render_settings:
+  version: 1.0
   Write:
     file_type_rules:
       exr:
@@ -83,6 +90,7 @@ render_settings:
 
 # Versioning (for Write nodes)
 versioning:
+  version: 1.0
   require_version_token: true
   version_token_regex: "_v(\\d+)" # Captures the version number
   # match_nuke_script_version: true # Future: Compare with Nuke script's version
@@ -91,6 +99,7 @@ versioning:
 
 # Bounding Boxes (Kept from original)
 bounding_boxes:
+  version: 1.0
   Read:
     severity: "warning"
   Write:
@@ -98,6 +107,7 @@ bounding_boxes:
 
 # Node Dependencies (Kept from original, review if still needed with other changes)
 node_dependencies:
+  version: 1.0
   Tracker: # Example
     required: ["Read"]
     severity: "error"
@@ -107,11 +117,13 @@ node_dependencies:
 
 # Node Names (Kept from original)
 node_names:
+  version: 1.0
   pattern: "^[A-Za-z0-9_]+$" # Allow uppercase
   severity: "warning"
 
 # Node Parameters (Generic, can be used for various checks)
 node_parameters:
+  version: 1.0
   Read:
     # Example: ensure 'premultiplied' is checked for certain file types if needed
     # premultiplied: { allowed_values: [true], severity: "warning", if_file_type: ["png_with_alpha"] }
@@ -121,6 +133,7 @@ node_parameters:
 
 # Node Connections (Kept from original)
 node_connections:
+  version: 1.0
   Merge2: # Nuke default Merge node is Merge2
     inputs: # Naming of inputs can be 'A', 'B' or by index if preferred
       A: { allowed_nodes: ["Read", "Grade", "Roto", "Transform", "Merge2"], severity: "warning" }
@@ -128,14 +141,17 @@ node_connections:
 
 # Viewport or Viewer Nodes
 viewer_nodes:
+  version: 1.0
   warn_if_ip_active: true # Checks 'ip' (use GPU for viewer process) knob
   severity: "info" # Usually an info or warning, not an error
 
 # Expressions and Script Errors
 expressions_errors:
+  version: 1.0
   check_for_errors: true # Enables checking knob.hasError()
   severity: "error" # Expression errors are usually critical
 read_file_errors:
+  version: 1.0
   check_existence: true # Enables checking if Read node files exist (first frame)
   severity: "error" # Missing files are critical
 
@@ -144,3 +160,79 @@ read_file_errors:
 # performance
 # node_metadata
 # node_expressions (Replaced by expressions_errors)
+
+path_structures:
+  version: 1.0
+  comp_path: "04_comp/<shot_name>/render/<resolution>/<version>"
+  nuke_render_path: "Renders/Nuke/<shot_name>/<resolution>/<version>"
+
+# --- Token Definitions for Advanced Logic ---
+token_definitions:
+  sequence:
+    regex: "[A-Z]{4}"
+    description: "Project code, 4 uppercase letters."
+    example: "WTFB"
+    tooltip: "4-letter project code (e.g. WTFB, KITC)"
+    auto_fix: false
+  shotNumber:
+    regex: "\\d{4}"
+    description: "Shot number, 4 digits."
+    example: "0101"
+    tooltip: "4-digit shot number (e.g. 0101, 1002)"
+    auto_fix: true
+    pad_to: 4
+  description:
+    regex: "[a-zA-Z0-9_]+"
+    description: "Short description, alphanumeric and underscores."
+    example: "comp"
+    tooltip: "Short description (e.g. comp, layout)"
+    auto_fix: false
+  pixelMappingName:
+    regex: "LL180|LL360"
+    description: "Pixel mapping name, optional."
+    example: "LL180"
+    tooltip: "Pixel mapping (LL180, LL360)"
+    auto_fix: false
+  resolution:
+    regex: "1K|2K|4K|6K|8K|19K|12K"
+    description: "Resolution, optional."
+    example: "2K"
+    tooltip: "Resolution (e.g. 2K, 4K)"
+    auto_fix: false
+  colorspace:
+    regex: "[a-zA-Z0-9_\-]+"
+    description: "Colorspace."
+    example: "sRGB"
+    tooltip: "Colorspace (e.g. sRGB, ACEScg)"
+    auto_fix: false
+  gamma:
+    regex: "[a-zA-Z0-9_\-]+"
+    description: "Gamma."
+    example: "2.2"
+    tooltip: "Gamma (e.g. 2.2, Linear)"
+    auto_fix: false
+  fps:
+    regex: "2997|5994"
+    description: "Frames per second, optional."
+    example: "2997"
+    tooltip: "FPS (e.g. 2997, 5994)"
+    auto_fix: false
+  version:
+    regex: "v\\d{3}"
+    description: "Version, v followed by 3 digits."
+    example: "v001"
+    tooltip: "Version (e.g. v001, v002)"
+    auto_fix: true
+    pad_to: 3
+  frame_padding:
+    regex: "%0\\dd"
+    description: "Frame padding, e.g. %04d."
+    example: "%04d"
+    tooltip: "Frame padding (e.g. %04d)"
+    auto_fix: false
+  extension:
+    regex: "exr|png|jpg|mov|nk"
+    description: "File extension."
+    example: "exr"
+    tooltip: "File extension (exr, png, jpg, mov, nk)"
+    auto_fix: false

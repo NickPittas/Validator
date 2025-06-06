@@ -82,6 +82,455 @@ DEFAULT_NAMING_TOKENS: Dict[str, Dict[str, Any]] = {
     }
 }
 
+FILENAME_TOKENS = [
+    {
+        "name": "sequence",
+        "label": "<sequence>",
+        "regex_template": "[A-Z]{{{n}}}",
+        "control": "spinner",
+        "min": 2,
+        "max": 8,
+        "default": 4,
+        "desc": "Uppercase sequence abbreviation"
+    },
+    {
+        "name": "shotNumber",
+        "label": "<shotNumber>",
+        "regex_template": "\\d{{{n}}}",
+        "control": "spinner",
+        "min": 2,
+        "max": 8,
+        "default": 4,
+        "desc": "Shot number (digits)"
+    },
+    {
+        "name": "description",
+        "label": "<description>",
+        "regex_template": "[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*",
+        "control": "static",
+        "desc": "Description (letters, numbers, hyphens)"
+    },
+    {
+        "name": "pixelMappingName",
+        "label": "<pixelMappingName>",
+        "regex_template": "(LL180|LL360)",
+        "control": "dropdown",
+        "options": ["LL180", "LL360", "none"],
+        "desc": "Pixel mapping name"
+    },
+    {
+        "name": "resolution",
+        "label": "<resolution>",
+        "regex_template": "\\d{1,2}k",
+        "control": "static",
+        "desc": "Resolution abbreviation (e.g., 1k, 4k)"
+    },
+    {
+        "name": "colorspaceGamma",
+        "label": "<colorspaceGamma>",
+        "regex_template": "(r709|sRGB|ap0|ap1|p3|rec2020)(lin|log|g22|g24|g26)",
+        "control": "dropdown",
+        "options": ["r709g22", "sRGBg24", "ap0log", "ap1lin", "p3g26", "none"],
+        "desc": "Colorspace and gamma"
+    },
+    {
+        "name": "fps",
+        "label": "<fps>",
+        "regex_template": "(2997|5994|24|25|30|50|60)",
+        "control": "dropdown",
+        "options": ["2997", "5994", "24", "25", "30", "50", "60"],
+        "desc": "Frames per second"
+    },
+    {
+        "name": "version",
+        "label": "<version>",
+        "regex_template": "v\\d{{{n}}}",
+        "control": "spinner",
+        "min": 2,
+        "max": 9,
+        "default": 3,
+        "desc": "Version (v + digits)"
+    },
+    {
+        "name": "frame_padding",
+        "label": "<frame_padding>",
+        "regex_template": "\\d{{{min,max}}}",
+        "control": "spinner_range",
+        "min": 4,
+        "max": 8,
+        "default": 4,
+        "desc": "Frame number padding"
+    },
+    {
+        "name": "extension",
+        "label": "<extension>",
+        "regex_template": "(?i)(jpg|jpeg|png|mxf|mov|exr)",
+        "control": "dropdown",
+        "options": ["jpg", "jpeg", "png", "mxf", "mov", "exr"],
+        "desc": "File extension"
+    },
+]
+
+class FilenameTokenWidget(QtWidgets.QWidget):
+    """
+    Widget for a single token in the template builder.
+    Shows the token label and, if needed, a control (spinner/dropdown).
+    """
+    def __init__(self, token_def, parent=None):
+        super().__init__(parent)
+        self.token_def = token_def
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.setContentsMargins(2, 2, 2, 2)
+        self.label = QtWidgets.QLabel(token_def["label"])
+        self.layout.addWidget(self.label)
+        self.control = None
+        if token_def["control"] == "spinner":
+            self.control = QtWidgets.QSpinBox()
+            self.control.setMinimum(token_def["min"])
+            self.control.setMaximum(token_def["max"])
+            self.control.setValue(token_def["default"])
+            self.layout.addWidget(self.control)
+        elif token_def["control"] == "spinner_range":
+            self.control = QtWidgets.QSpinBox()
+            self.control.setMinimum(token_def["min"])
+            self.control.setMaximum(token_def["max"])
+            self.control.setValue(token_def["default"])
+            self.layout.addWidget(self.control)
+        elif token_def["control"] == "dropdown":
+            self.control = QtWidgets.QComboBox()
+            self.control.addItems(token_def["options"])
+            self.layout.addWidget(self.control)
+        # else: static, no control
+        self.remove_btn = QtWidgets.QToolButton()
+        self.remove_btn.setText("✕")
+        self.remove_btn.setToolTip("Remove token")
+        self.layout.addWidget(self.remove_btn)
+        self.setLayout(self.layout)
+
+    def get_token_config(self):
+        # Return dict with token name and current control value (if any)
+        value = None
+        if self.control:
+            if isinstance(self.control, QtWidgets.QSpinBox):
+                value = self.control.value()
+            elif isinstance(self.control, QtWidgets.QComboBox):
+                value = self.control.currentText()
+        return {"name": self.token_def["name"], "value": value}
+
+class SeparatorWidget(QtWidgets.QWidget):
+    """Widget for a separator (e.g., _, ., -) in the template builder."""
+    def __init__(self, sep, parent=None):
+        super().__init__(parent)
+        self.sep = sep
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.setContentsMargins(2, 2, 2, 2)
+        self.label = QtWidgets.QLabel(sep)
+        self.label.setStyleSheet("font-weight: bold; font-size: 16px;")
+        self.layout.addWidget(self.label)
+        self.remove_btn = QtWidgets.QToolButton()
+        self.remove_btn.setText("✕")
+        self.remove_btn.setToolTip("Remove separator")
+        self.layout.addWidget(self.remove_btn)
+        self.setLayout(self.layout)
+    def get_token_config(self):
+        return {"separator": self.sep}
+
+class FilenameTemplateBuilder(QtWidgets.QWidget):
+    """
+    Widget for building the filename template as a sequence of tokens and separators.
+    Supports drag-and-drop reordering.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.setContentsMargins(4, 4, 4, 4)
+        self.layout.setSpacing(4)
+        self.token_widgets: List[QtWidgets.QWidget] = []
+        self.setAcceptDrops(True)
+        self.setStyleSheet("background: #f7f7fa; border: 1px solid #b0b0b0; border-radius: 6px;")
+        self.setLayout(self.layout)
+    def add_token(self, token_def):
+        widget = FilenameTokenWidget(token_def)
+        widget.remove_btn.clicked.connect(lambda: self.remove_token(widget))
+        widget.setToolTip(token_def["desc"])
+        self.token_widgets.append(widget)
+        self.layout.addWidget(widget)
+        self.update()
+        widget.installEventFilter(self)
+    def add_separator(self, sep):
+        widget = SeparatorWidget(sep)
+        widget.remove_btn.clicked.connect(lambda: self.remove_token(widget))
+        widget.setToolTip(f"Separator '{sep}'")
+        self.token_widgets.append(widget)
+        self.layout.addWidget(widget)
+        self.update()
+        widget.installEventFilter(self)
+    def remove_token(self, widget):
+        self.layout.removeWidget(widget)
+        widget.deleteLater()
+        self.token_widgets.remove(widget)
+        self.update()
+    def get_template_config(self):
+        result = []
+        for w in self.token_widgets:
+            if isinstance(w, FilenameTokenWidget):
+                result.append(w.get_token_config())
+            elif isinstance(w, SeparatorWidget):
+                result.append(w.get_token_config())
+        return result
+    def clear(self):
+        for w in self.token_widgets:
+            self.layout.removeWidget(w)
+            w.deleteLater()
+        self.token_widgets.clear()
+        self.update()
+    # Drag-and-drop support
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Type.MouseButtonPress:
+            self._drag_start_pos = event.pos()
+        elif event.type() == QtCore.QEvent.Type.MouseMove and hasattr(self, '_drag_start_pos'):
+            if (event.pos() - self._drag_start_pos).manhattanLength() > QtWidgets.QApplication.startDragDistance():
+                mime = QtCore.QMimeData()
+                idx = self.token_widgets.index(obj)
+                mime.setData("application/x-tokenwidget-index", str(idx).encode())
+                drag = QtGui.QDrag(obj)
+                drag.setMimeData(mime)
+                drag.exec()
+        return super().eventFilter(obj, event)
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat("application/x-tokenwidget-index"):
+            event.acceptProposedAction()
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat("application/x-tokenwidget-index"):
+            event.acceptProposedAction()
+    def dropEvent(self, event):
+        if event.mimeData().hasFormat("application/x-tokenwidget-index"):
+            from_idx = int(bytes(event.mimeData().data("application/x-tokenwidget-index")).decode())
+            to_pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
+            to_idx = 0
+            for i, w in enumerate(self.token_widgets):
+                if w.geometry().contains(to_pos):
+                    to_idx = i
+                    break
+            if from_idx != to_idx:
+                widget = self.token_widgets.pop(from_idx)
+                self.token_widgets.insert(to_idx, widget)
+                # Remove all widgets and re-add in new order
+                for w in self.token_widgets:
+                    self.layout.removeWidget(w)
+                for w in self.token_widgets:
+                    self.layout.addWidget(w)
+                self.update()
+            event.acceptProposedAction()
+
+class FilenameRuleEditor(QtWidgets.QWidget):
+    """
+    Main widget for the filename rule editor, including token palette, template builder, and regex preview.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        # Token palette (now multi-row grid)
+        palette_widget = QtWidgets.QWidget()
+        palette_grid = QtWidgets.QGridLayout(palette_widget)
+        palette_grid.setSpacing(4)
+        palette_grid.setContentsMargins(0,0,0,0)
+        palette_grid.addWidget(QtWidgets.QLabel("Tokens:"), 0, 0, 1, 2)
+        max_cols = 5
+        row = 1
+        col = 0
+        self.token_buttons = []
+        for i, token_def in enumerate(FILENAME_TOKENS):
+            btn = QtWidgets.QPushButton(token_def["label"])
+            btn.setToolTip(token_def["desc"])
+            btn.setMinimumWidth(90)
+            btn.setMinimumHeight(32)
+            btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+            btn.clicked.connect(lambda _, td=token_def: self.add_token_to_template(td))
+            palette_grid.addWidget(btn, row, col)
+            self.token_buttons.append(btn)
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+        # Separator buttons
+        sep_row = row + 1
+        sep_col = 0
+        for sep in ["_", ".", "-", " "]:
+            sep_btn = QtWidgets.QPushButton(f"'{sep}'")
+            sep_btn.setToolTip(f"Insert separator '{sep}'")
+            sep_btn.setMinimumWidth(40)
+            sep_btn.setMinimumHeight(32)
+            sep_btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+            sep_btn.clicked.connect(lambda _, s=sep: self.add_separator_to_template(s))
+            palette_grid.addWidget(sep_btn, sep_row, sep_col)
+            sep_col += 1
+        layout.addWidget(palette_widget)
+        # Template builder
+        self.template_builder = FilenameTemplateBuilder()
+        layout.addWidget(self.template_builder)
+        # Clear button
+        clear_btn = QtWidgets.QPushButton("Clear Template")
+        clear_btn.setToolTip("Remove all tokens and separators from the template")
+        clear_btn.clicked.connect(self.clear_and_update)
+        layout.addWidget(clear_btn)
+        # Regex preview with validation
+        regex_layout = QtWidgets.QHBoxLayout()
+        regex_layout.addWidget(QtWidgets.QLabel("Regex Preview:"))
+        self.regex_edit = QtWidgets.QLineEdit()
+        self.regex_edit.setReadOnly(False)
+        regex_layout.addWidget(self.regex_edit)
+        self.regex_status_icon = QtWidgets.QLabel()
+        self.regex_status_icon.setFixedSize(20, 20)
+        regex_layout.addWidget(self.regex_status_icon)
+        layout.addLayout(regex_layout)
+        # Example filename preview
+        example_layout = QtWidgets.QHBoxLayout()
+        example_layout.addWidget(QtWidgets.QLabel("Example Filename:"))
+        self.example_edit = QtWidgets.QLineEdit()
+        self.example_edit.setReadOnly(True)
+        example_layout.addWidget(self.example_edit)
+        layout.addLayout(example_layout)
+        # Save/load buttons
+        btn_layout = QtWidgets.QHBoxLayout()
+        self.save_btn = QtWidgets.QPushButton("Save Template")
+        self.load_btn = QtWidgets.QPushButton("Load Template")
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.load_btn)
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+        # Connect
+        self.template_builder.layout.setSpacing(4)
+        self.template_builder.layout.setContentsMargins(4,4,4,4)
+        self.template_builder.layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.save_btn.clicked.connect(self.save_template)
+        self.load_btn.clicked.connect(self.load_template)
+        # Update regex and example when template changes
+        self.template_builder.layout.installEventFilter(self)
+        self.regex_edit.textChanged.connect(self.on_regex_edit)
+        self.template_builder.layout.parentWidget().installEventFilter(self)
+        # Initial update
+        self.update_regex()
+    def add_token_to_template(self, token_def):
+        self.template_builder.add_token(token_def)
+        self.update_regex()
+    def add_separator_to_template(self, sep):
+        self.template_builder.add_separator(sep)
+        self.update_regex()
+    def clear_and_update(self):
+        self.template_builder.clear()
+        self.update_regex()
+    def update_regex(self):
+        regex_parts = []
+        example_parts = []
+        # Get allowed resolution from Resolution rule (single value)
+        allowed_resolution = None
+        try:
+            from nuke_validator_ui import RulesEditorWidget
+            rules_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules.yaml")
+            with open(rules_path, 'r') as f:
+                rules = yaml.safe_load(f)
+                allowed = rules.get('write_node_resolution', {}).get('allowed_formats', [])
+                if allowed:
+                    allowed_resolution = allowed[0]
+        except Exception:
+            allowed_resolution = "2K"
+        for token_cfg in self.template_builder.get_template_config():
+            if "separator" in token_cfg:
+                regex_parts.append(re.escape(token_cfg["separator"]))
+                example_parts.append(token_cfg["separator"])
+            else:
+                token = next((t for t in FILENAME_TOKENS if t["name"] == token_cfg["name"]), None)
+                if not token:
+                    continue
+                if token["name"] == "resolution":
+                    regex = re.escape(allowed_resolution) if allowed_resolution else token["regex_template"]
+                    example = allowed_resolution or "2K"
+                elif token["control"] == "spinner":
+                    n = token_cfg["value"] or token["default"]
+                    regex = token["regex_template"].replace("{n}", str(n))
+                    example = ("A" * n) if token["name"] == "sequence" else ("0" * n)
+                elif token["control"] == "spinner_range":
+                    minv = token_cfg["value"] or token["min"]
+                    regex = token["regex_template"].replace("{min,max}", f"{minv},{token['max']}")
+                    example = "0" * minv
+                elif token["control"] == "dropdown":
+                    val = token_cfg["value"]
+                    if val and val != "none":
+                        regex = f"({val})"
+                        example = val
+                    else:
+                        regex = token["regex_template"]
+                        example = token["options"][0] if token["options"] else ""
+                else:
+                    regex = token["regex_template"]
+                    example = token.get("examples", ["demo"])[0]
+                regex_parts.append(regex)
+                example_parts.append(str(example))
+        regex_str = "^" + "".join(regex_parts) + "$"
+        self.regex_edit.setText(regex_str)
+        self.validate_regex(regex_str)
+        self.example_edit.setText("".join(example_parts))
+    def validate_regex(self, regex_str):
+        import re
+        try:
+            re.compile(regex_str)
+            self.regex_edit.setStyleSheet("border: 2px solid #4caf50;")
+            self.regex_status_icon.setPixmap(QtGui.QPixmap(20, 20))
+            self.regex_status_icon.setStyleSheet("background: #4caf50; border-radius: 10px;")
+        except re.error:
+            self.regex_edit.setStyleSheet("border: 2px solid #e53935;")
+            self.regex_status_icon.setPixmap(QtGui.QPixmap(20, 20))
+            self.regex_status_icon.setStyleSheet("background: #e53935; border-radius: 10px;")
+    def eventFilter(self, obj, event):
+        if event.type() in (QtCore.QEvent.Type.ChildRemoved, QtCore.QEvent.Type.ChildAdded, QtCore.QEvent.Type.LayoutRequest):
+            self.update_regex()
+        return super().eventFilter(obj, event)
+    def save_template(self):
+        import yaml
+        config = {
+            "template": self.template_builder.get_template_config(),
+            "regex": self.regex_edit.text()
+        }
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Template", "", "YAML Files (*.yaml);;JSON Files (*.json)")
+        if path:
+            with open(path, "w") as f:
+                if path.endswith(".json"):
+                    import json
+                    json.dump(config, f, indent=2)
+                else:
+                    yaml.dump(config, f, sort_keys=False)
+    def load_template(self):
+        import yaml
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Template", "", "YAML Files (*.yaml);;JSON Files (*.json)")
+        if path:
+            with open(path, "r") as f:
+                if path.endswith(".json"):
+                    import json
+                    config = json.load(f)
+                else:
+                    config = yaml.safe_load(f)
+            self.template_builder.clear()
+            for token_cfg in config.get("template", []):
+                if "separator" in token_cfg:
+                    self.template_builder.add_separator(token_cfg["separator"])
+                else:
+                    token = next((t for t in FILENAME_TOKENS if t["name"] == token_cfg["name"]), None)
+                    if token:
+                        self.template_builder.add_token(token)
+                        widget = self.template_builder.token_widgets[-1]
+                        if widget.control and token_cfg.get("value") is not None:
+                            if isinstance(widget.control, QtWidgets.QSpinBox):
+                                widget.control.setValue(token_cfg["value"])
+                            elif isinstance(widget.control, QtWidgets.QComboBox):
+                                idx = widget.control.findText(token_cfg["value"])
+                                if idx >= 0:
+                                    widget.control.setCurrentIndex(idx)
+            self.update_regex()
+    def on_regex_edit(self):
+        # Optionally, validate regex or update preview
+        self.validate_regex(self.regex_edit.text())
 
 class RuleItemWidget(QtWidgets.QWidget):
     """
@@ -172,8 +621,12 @@ class RulesEditorWidget(QtWidgets.QWidget):
 
         # Left pane: Category List
         self.category_list = QtWidgets.QListWidget()
-        # self.category_list.setMaximumWidth(300) # Let's remove fixed max width, splitter will handle
+        self.category_list.setFixedWidth(220)
+        self.category_list.setMinimumWidth(220)
+        self.category_list.setMaximumWidth(220)
         self.rules_splitter.addWidget(self.category_list)
+        self.rules_splitter.setStretchFactor(0, 0)  # Left panel fixed
+        self.rules_splitter.setStretchFactor(1, 1)  # Right panel flexible
 
         # Right pane: StackedWidget for settings pages
         self.settings_stack = QtWidgets.QStackedWidget()
@@ -220,6 +673,7 @@ class RulesEditorWidget(QtWidgets.QWidget):
         self.create_versioning_tab()
         self.create_viewer_nodes_tab()
         self.create_script_errors_tab()
+        self.create_path_structure_tab()
 
     def _load_yaml_file(self, file_path: str) -> Optional[Dict]:
         if not os.path.exists(file_path):
@@ -291,46 +745,10 @@ class RulesEditorWidget(QtWidgets.QWidget):
         convention_group = QtWidgets.QGroupBox("Dynamic Filename Convention")
         convention_layout = QtWidgets.QVBoxLayout()
 
-        # Template Editor
-        template_form_layout = QtWidgets.QFormLayout()
-        self.fp_template_edit = QtWidgets.QLineEdit(self.filename_template)
-        self.fp_template_edit.setToolTip(
-            "Define the filename structure using tokens like <sequence> or (?<optional_token>)?. "
-            "Separators like _ or . should be included directly in the template."
-        )
-        template_form_layout.addRow("Filename Template:", self.fp_template_edit)
-        convention_layout.addLayout(template_form_layout)
+        # Filename Rule Editor
+        self.filename_rule_editor = FilenameRuleEditor()
+        convention_layout.addWidget(self.filename_rule_editor)
 
-        # Token Editor Table
-        convention_layout.addWidget(QtWidgets.QLabel("Filename Tokens:"))
-        self.fp_token_table = QtWidgets.QTableWidget()
-        self.fp_token_table.setColumnCount(4) # Token, Regex, Description, Separator After
-        self.fp_token_table.setHorizontalHeaderLabels(["Token", "Regex Pattern", "Description", "Separator After"])
-        self._populate_token_table() # Populate with default/loaded tokens
-        self.fp_token_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.fp_token_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Interactive) # Token name
-        self.fp_token_table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeMode.Interactive) # Separator
-        self.fp_token_table.setMinimumHeight(200)
-        convention_layout.addWidget(self.fp_token_table)
-        
-        # Regex Generation and Display
-        regex_gen_layout = QtWidgets.QHBoxLayout()
-        self.fp_generate_regex_button = QtWidgets.QPushButton("Generate/Update Regex from Template & Tokens")
-        self.fp_generate_regex_button.clicked.connect(self._generate_regex_from_template_and_tokens)
-        regex_gen_layout.addWidget(self.fp_generate_regex_button)
-        convention_layout.addLayout(regex_gen_layout)
-
-        constructed_regex_form_layout = QtWidgets.QFormLayout()
-        self.fp_naming_pattern_regex_edit = QtWidgets.QLineEdit()
-        self.fp_naming_pattern_regex_edit.setReadOnly(True) # Display only, generated from template
-        self.fp_naming_pattern_regex_edit.setToolTip("This regex is constructed from the template and tokens above.")
-        constructed_regex_form_layout.addRow("Constructed Regex:", self.fp_naming_pattern_regex_edit)
-        
-        self.fp_severity_naming_combo = QtWidgets.QComboBox()
-        self._populate_combobox(self.fp_severity_naming_combo, self.dropdown_options.get('severity_options'))
-        constructed_regex_form_layout.addRow("Severity (Naming Pattern):", self.fp_severity_naming_combo)
-        convention_layout.addLayout(constructed_regex_form_layout)
-        
         convention_group.setLayout(convention_layout)
         main_tab_layout.addWidget(convention_group)
         
@@ -338,128 +756,6 @@ class RulesEditorWidget(QtWidgets.QWidget):
         # self.tabs.addTab(tab, "File Path & Naming") # Old way
         self.category_list.addItem("File Path & Naming")
         self.settings_stack.addWidget(tab)
-
-    def _populate_token_table(self, tokens_data: Optional[Dict[str, Dict[str, Any]]] = None):
-        """Populates the token editor table with token data."""
-        if tokens_data is None:
-            tokens_data = self.filename_tokens
-
-        self.fp_token_table.setRowCount(0) # Clear existing rows
-        self.fp_token_table.setRowCount(len(tokens_data))
-
-        for row, (token_name, token_info) in enumerate(tokens_data.items()):
-            # Token Name (not editable by default, it's the key)
-            name_item = QtWidgets.QTableWidgetItem(token_name)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable) # Make non-editable
-            self.fp_token_table.setItem(row, 0, name_item)
-
-            # Regex Pattern
-            regex_item = QtWidgets.QTableWidgetItem(token_info.get("regex", ""))
-            self.fp_token_table.setItem(row, 1, regex_item)
-
-            # Description
-            desc_item = QtWidgets.QTableWidgetItem(token_info.get("description", ""))
-            self.fp_token_table.setItem(row, 2, desc_item)
-            
-            # Separator After
-            separator_item = QtWidgets.QTableWidgetItem(token_info.get("separator", ""))
-            self.fp_token_table.setItem(row, 3, separator_item)
-        
-        self.fp_token_table.resizeColumnsToContents()
-        self.fp_token_table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Stretch) # Regex
-        self.fp_token_table.horizontalHeader().setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.Stretch) # Description
-
-
-    def _get_tokens_from_table(self) -> Dict[str, Dict[str, Any]]:
-        """Extracts token definitions from the QTableWidget."""
-        tokens_data = {}
-        for row in range(self.fp_token_table.rowCount()):
-            try:
-                token_name = self.fp_token_table.item(row, 0).text()
-                regex_pattern = self.fp_token_table.item(row, 1).text()
-                description = self.fp_token_table.item(row, 2).text()
-                separator = self.fp_token_table.item(row, 3).text()
-                tokens_data[token_name] = {
-                    "regex": regex_pattern,
-                    "description": description,
-                    "separator": separator
-                    # 'examples' are not directly edited in the table for now
-                }
-            except AttributeError: # Catch if a cell item is None
-                print(f"Warning: Row {row} in token table might be incomplete.")
-                continue
-        return tokens_data
-
-    def _generate_regex_from_template_and_tokens(self):
-        """
-        Generates a regex string from the filename template and token definitions.
-        Updates the 'Constructed Regex' field.
-        """
-        template = self.fp_template_edit.text()
-        self.filename_tokens = self._get_tokens_from_table() # Update internal tokens from table
-
-        final_regex_parts = []
-        
-        # Regex to find tokens: <token_name> or (?<token_name>)?
-        # It captures the optional marker '(?< >)?' and the token name itself.
-        token_finder_regex = re.compile(r"(?P<optional_marker>\(\?\<\s*)?(?P<token_name>\w+)(?(optional_marker)\s*\>\)?)")
-
-        last_index = 0
-        for match in token_finder_regex.finditer(template):
-            # Add literal part before the token
-            literal_part = template[last_index:match.start()]
-            if literal_part:
-                final_regex_parts.append(re.escape(literal_part))
-
-            token_name = match.group("token_name")
-            is_optional_syntax = bool(match.group("optional_marker")) # Checks if '(?< >)?' syntax was used
-
-            if token_name in self.filename_tokens:
-                token_info = self.filename_tokens[token_name]
-                token_regex = token_info.get("regex", "")
-                
-                # Separator logic:
-                # The separator is part of the token's group if the token is optional.
-                # If the token is mandatory, the separator is handled by the next literal part or end of string.
-                # For simplicity, we'll assume separators in the template are literal characters for now.
-                # The 'separator' field in token_info is more for documentation or more complex generation.
-
-                if is_optional_syntax:
-                    # For optional tokens like (?<pixelMappingName>)?, make the group optional
-                    # We need to be careful if a separator is *part* of the optional group.
-                    # Example: _(?<pixelMappingName>)? means the underscore is also optional with the token.
-                    # If template is ...<token1>_(?<token2>)?<token3>...
-                    # The _ before (?<token2>)? needs to be handled.
-                    # The current token_finder_regex doesn't capture separators associated with optional tokens.
-                    # We'll assume for now that separators are outside the (?< >)? optional markers.
-                    # A more robust parser would look at characters immediately before/after the optional token.
-                    
-                    # Simple optional group for the token's regex:
-                    final_regex_parts.append(f"(?:{token_regex})?")
-                else:
-                    final_regex_parts.append(f"({token_regex})") # Capture group for mandatory tokens
-            else:
-                # Token not found, treat as literal but warn
-                print(f"Warning: Token '{token_name}' found in template but not defined in tokens table. Treating as literal.")
-                final_regex_parts.append(re.escape(match.group(0)))
-            
-            last_index = match.end()
-
-        # Add any remaining literal part after the last token
-        remaining_literal = template[last_index:]
-        if remaining_literal:
-            final_regex_parts.append(re.escape(remaining_literal))
-        
-        full_regex = "".join(final_regex_parts)
-        
-        # Anchor the regex
-        if full_regex and not full_regex.startswith("^"):
-            full_regex = "^" + full_regex
-        if full_regex and not full_regex.endswith("$"):
-            full_regex = full_regex + "$"
-            
-        self.fp_naming_pattern_regex_edit.setText(full_regex)
-        print(f"DEBUG: Generated Regex: {full_regex}")
 
     def create_frame_range_tab(self):
         """
@@ -745,48 +1041,43 @@ class RulesEditorWidget(QtWidgets.QWidget):
         # self.tabs.addTab(tab, "Script Errors") # Old way
         self.category_list.addItem("Script Errors")
         self.settings_stack.addWidget(tab)
-    
-    def generate_filename_convention(self): # This method seems out of place for RulesEditorWidget
-        """
-        Generate a filename convention based on the current settings.
-        NOTE: This method's UI elements (sequence_combo, shot_spin, etc.) are not defined
-        within RulesEditorWidget's __init__ or its tab creation methods.
-        This suggests it might be from a previous version or intended for a different UI context.
-        """
-        # The following attributes are not defined in this class:
-        # self.sequence_combo, self.shot_spin, self.desc_combo, self.pixel_combo, 
-        # self.res_combo, self.color_combo, self.gamma_combo, self.fps_combo, 
-        # self.version_spin, self.frame_spin, self.ext_combo, self.convention_label
-        # This method will raise AttributeErrors if called.
-        # For now, commenting out the problematic parts.
-        print("generate_filename_convention called, but its UI elements are not defined in RulesEditorWidget.")
-        return
-        # sequence = self.sequence_combo.currentText()
-        # shot = f"{self.shot_spin.value():04d}"
-        # ... (rest of the original method) ...
-        # self.convention_label.setText(f"Generated Convention: {convention}")
 
+    def create_path_structure_tab(self):
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tab)
+        # Load path_structures from rules.yaml
+        path_structures = self._load_yaml_file(self.rules_yaml_path).get('path_structures', {})
+        self.path_rule_editor = PathRuleEditor(path_structures=path_structures)
+        layout.addWidget(self.path_rule_editor)
+        tab.setLayout(layout)
+        self.category_list.addItem("Path Structure")
+        self.settings_stack.addWidget(tab)
 
     def save_rules_to_yaml(self):
         """ Gathers data from UI elements and saves to rules.yaml. """
         rules_data = {}
-
         # --- File Paths & Naming ---
         fp_rules = {}
         fp_rules['relative_path_required'] = self.fp_relative_path_check.isChecked()
         fp_rules['severity_relative_path'] = self._get_combobox_value(self.fp_severity_relative_combo)
-        
         # Save dynamic naming convention parts
-        fp_rules['filename_template'] = self.fp_template_edit.text()
-        fp_rules['filename_tokens'] = self._get_tokens_from_table() # Get current tokens from UI
+        fp_rules['filename_template'] = self.filename_rule_editor.regex_edit.text()
+        fp_rules['filename_tokens'] = self.filename_rule_editor.template_builder.get_template_config()
         # Ensure regex is generated before saving if user hasn't clicked the button recently
-        self._generate_regex_from_template_and_tokens()
-        constructed_regex = self.fp_naming_pattern_regex_edit.text()
+        self.filename_rule_editor.update_regex()
+        constructed_regex = self.filename_rule_editor.regex_edit.text()
         if constructed_regex:
             fp_rules['naming_pattern_regex'] = constructed_regex # This is the constructed/validated regex
-        
-        fp_rules['severity_naming_pattern'] = self._get_combobox_value(self.fp_severity_naming_combo)
+        fp_rules['severity_naming_pattern'] = self._get_combobox_value(self.rs_severity_combo)
         rules_data['file_paths'] = fp_rules
+        # Save path rule editor config
+        if hasattr(self, 'path_rule_editor'):
+            rules_data['path_rules'] = {
+                'base_path': self.path_rule_editor.base_path_edit.text(),
+                'shot_structure': self.path_rule_editor.shot_struct_combo.currentText(),
+                'relative_path': self.path_rule_editor.rel_path_edit.text(),
+                'tokens': {token: combo.currentText() for token, combo in self.path_rule_editor.token_controls.items()}
+            }
 
         if hasattr(self, 'fr_consistency_check'): # Frame Range Tab
             fr_rules = {
@@ -875,40 +1166,39 @@ class RulesEditorWidget(QtWidgets.QWidget):
     def load_rules_from_yaml(self):
         """ Loads rules from rules.yaml and populates the UI elements. """
         loaded_rules = self._load_yaml_file(self.rules_yaml_path) or {}
-
         # --- File Paths & Naming ---
         fp_rules = loaded_rules.get('file_paths', {})
         self.fp_relative_path_check.setChecked(fp_rules.get('relative_path_required', False))
         self._populate_combobox(self.fp_severity_relative_combo, self.dropdown_options.get('severity_options'), fp_rules.get('severity_relative_path'))
-
         # Load dynamic naming convention parts
-        self.filename_template = fp_rules.get('filename_template', DEFAULT_FILENAME_TEMPLATE)
-        self.fp_template_edit.setText(self.filename_template)
-        
-        loaded_tokens = fp_rules.get('filename_tokens')
-        if loaded_tokens and isinstance(loaded_tokens, dict):
-             # Ensure all default tokens are present, update with loaded if they exist
-            self.filename_tokens = DEFAULT_NAMING_TOKENS.copy() # Start with defaults
-            for token_name, token_data in loaded_tokens.items():
-                if token_name in self.filename_tokens: # Update existing default token
-                    self.filename_tokens[token_name].update(token_data)
-                else: # Add new custom token if not in defaults (less common for this design)
-                    self.filename_tokens[token_name] = token_data
-        else: # Fallback to defaults if not found or invalid format
-            self.filename_tokens = DEFAULT_NAMING_TOKENS.copy()
-            
-        self._populate_token_table(self.filename_tokens) # Populate table from loaded/default tokens
-        
-        # Load or generate the constructed regex
-        constructed_regex = fp_rules.get('naming_pattern_regex', "") # This key now stores the constructed one
-        if constructed_regex:
-            self.fp_naming_pattern_regex_edit.setText(constructed_regex)
-        else:
-            # If no pre-constructed regex, generate it from loaded template and tokens
-            self._generate_regex_from_template_and_tokens()
-            
-        self._populate_combobox(self.fp_severity_naming_combo, self.dropdown_options.get('severity_options'), fp_rules.get('severity_naming_pattern'))
-
+        self.filename_rule_editor.regex_edit.setText(fp_rules.get('naming_pattern_regex', ""))
+        self.filename_rule_editor.template_builder.clear()
+        for token_cfg in fp_rules.get('filename_tokens', []):
+            token = next((t for t in FILENAME_TOKENS if t["name"] == token_cfg["name"]), None)
+            if token:
+                self.filename_rule_editor.template_builder.add_token(token)
+                if token_cfg.get("value") is not None:
+                    widget = self.filename_rule_editor.template_builder.token_widgets[-1]
+                    if isinstance(widget.control, QtWidgets.QSpinBox):
+                        widget.control.setValue(token_cfg["value"])
+                    elif isinstance(widget.control, QtWidgets.QComboBox):
+                        idx = widget.control.findText(token_cfg["value"])
+                        if idx >= 0:
+                            widget.control.setCurrentIndex(idx)
+            self.filename_rule_editor.update_regex()
+        self._populate_combobox(self.fr_severity_combo, self.dropdown_options.get('severity_options'), fp_rules.get('severity'))
+        # Load path rule editor config
+        path_rules = loaded_rules.get('path_rules', {})
+        if hasattr(self, 'path_rule_editor') and path_rules:
+            self.path_rule_editor.base_path_edit.setText(path_rules.get('base_path', ""))
+            self.path_rule_editor.rel_path_edit.setText(path_rules.get('relative_path', ""))
+            for token, value in path_rules.get('tokens', {}).items():
+                if token in self.path_rule_editor.token_controls:
+                    self.path_rule_editor.token_controls[token].setCurrentText(value)
+            idx = self.path_rule_editor.shot_struct_combo.findText(path_rules.get('shot_structure', ""))
+            if idx >= 0:
+                self.path_rule_editor.shot_struct_combo.setCurrentIndex(idx)
+            self.path_rule_editor.update_preview()
         fr_rules = loaded_rules.get('frame_range', {}) # Frame Range Tab
         if hasattr(self, 'fr_consistency_check'):
             self.fr_consistency_check.setChecked(fr_rules.get('check_consistency', True))
@@ -980,3 +1270,187 @@ class RulesEditorWidget(QtWidgets.QWidget):
         self._populate_combobox(self.se_severity_read_file_combo, self.dropdown_options.get('severity_options'), se_rules_read.get('severity'))
         
         print(f"Rules loaded from {self.rules_yaml_path}")
+
+class PathRuleEditor(QtWidgets.QWidget):
+    """
+    Widget for path validation rule editing: base path selector, relative path builder, live preview.
+    """
+    def __init__(self, parent=None, path_structures=None):
+        super().__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        # Help/info button
+        help_btn = QtWidgets.QPushButton("?")
+        help_btn.setFixedWidth(24)
+        help_btn.setToolTip("Show help and usage instructions")
+        help_btn.clicked.connect(self.show_help_dialog)
+        layout.addWidget(help_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        # Base path selector
+        base_path_layout = QtWidgets.QHBoxLayout()
+        base_path_label = QtWidgets.QLabel("Base Path:")
+        base_path_label.setToolTip("The root directory for all output paths.")
+        self.base_path_edit = QtWidgets.QLineEdit()
+        self.base_path_edit.setPlaceholderText("e.g. V:/Project/Sequence/Shot")
+        self.base_path_edit.setToolTip("Set the root directory for output paths.")
+        browse_btn = QtWidgets.QPushButton("Browse")
+        browse_btn.setToolTip("Browse for base path")
+        browse_btn.clicked.connect(self.browse_base_path)
+        base_path_layout.addWidget(base_path_label)
+        base_path_layout.addWidget(self.base_path_edit)
+        base_path_layout.addWidget(browse_btn)
+        layout.addLayout(base_path_layout)
+        # Shot structure dropdown
+        shot_struct_layout = QtWidgets.QHBoxLayout()
+        shot_struct_label = QtWidgets.QLabel("Shot Structure:")
+        shot_struct_label.setToolTip("Select a path template for your project/shot.")
+        self.shot_struct_combo = QtWidgets.QComboBox()
+        self.shot_struct_combo.setToolTip("Select a shot structure template")
+        shot_struct_layout.addWidget(shot_struct_label)
+        shot_struct_layout.addWidget(self.shot_struct_combo)
+        layout.addLayout(shot_struct_layout)
+        # Token-based relative path builder
+        self.token_controls = {}
+        self.rel_path_tokens = ["<shot_name>", "<resolution>", "<version>"]
+        rel_path_tokens_layout = QtWidgets.QHBoxLayout()
+        rel_path_tokens_layout.addWidget(QtWidgets.QLabel("Tokens:"))
+        for token in self.rel_path_tokens:
+            combo = QtWidgets.QComboBox()
+            combo.setEditable(True)
+            combo.setToolTip(f"Set value for {token}")
+            combo.setStyleSheet("background: #f0f7ff; border: 1px solid #b0c4de; border-radius: 4px; padding: 2px 6px;")
+            self.token_controls[token] = combo
+            rel_path_tokens_layout.addWidget(QtWidgets.QLabel(token))
+            rel_path_tokens_layout.addWidget(combo)
+            combo.currentTextChanged.connect(self.update_preview)
+        autofill_btn = QtWidgets.QPushButton("Auto-fill from Script")
+        autofill_btn.setToolTip("Auto-fill tokens from the current Nuke script name.")
+        autofill_btn.clicked.connect(self.autofill_tokens_from_script)
+        rel_path_tokens_layout.addWidget(autofill_btn)
+        layout.addLayout(rel_path_tokens_layout)
+        # Relative path display
+        rel_path_layout = QtWidgets.QHBoxLayout()
+        rel_path_label = QtWidgets.QLabel("Relative Path:")
+        rel_path_label.setToolTip("The relative path, with tokens replaced by your values.")
+        self.rel_path_edit = QtWidgets.QLineEdit()
+        self.rel_path_edit.setReadOnly(True)
+        self.rel_path_edit.setToolTip("The relative path, with tokens replaced by your values.")
+        rel_path_layout.addWidget(rel_path_label)
+        rel_path_layout.addWidget(self.rel_path_edit)
+        layout.addLayout(rel_path_layout)
+        # Live preview
+        preview_layout = QtWidgets.QHBoxLayout()
+        preview_layout.addWidget(QtWidgets.QLabel("Resolved Path Preview:"))
+        self.preview_edit = QtWidgets.QLineEdit()
+        self.preview_edit.setReadOnly(True)
+        self.preview_edit.setToolTip("The full resolved output path.")
+        preview_layout.addWidget(self.preview_edit)
+        copy_btn = QtWidgets.QPushButton("Copy")
+        copy_btn.setToolTip("Copy the resolved path to clipboard.")
+        copy_btn.clicked.connect(self.copy_preview_to_clipboard)
+        preview_layout.addWidget(copy_btn)
+        layout.addLayout(preview_layout)
+        # Save/load buttons
+        btn_layout = QtWidgets.QHBoxLayout()
+        self.save_btn = QtWidgets.QPushButton("Save Path Template")
+        self.load_btn = QtWidgets.QPushButton("Load Path Template")
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.load_btn)
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+        # Connect
+        self.base_path_edit.textChanged.connect(self.update_preview)
+        self.shot_struct_combo.currentTextChanged.connect(self.on_shot_struct_changed)
+        self.save_btn.clicked.connect(self.save_template)
+        self.load_btn.clicked.connect(self.load_template)
+        # Populate shot structure dropdown if provided
+        if path_structures:
+            for key, value in path_structures.items():
+                self.shot_struct_combo.addItem(f"{key}: {value}", value)
+        self.shot_struct_combo.setCurrentIndex(0)
+        self.on_shot_struct_changed(self.shot_struct_combo.currentText())
+    def browse_base_path(self):
+        path = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Base Path")
+        if path:
+            self.base_path_edit.setText(path)
+    def update_preview(self):
+        struct_template = self.shot_struct_combo.currentData() or ""
+        rel_path = struct_template
+        for token, combo in self.token_controls.items():
+            rel_path = rel_path.replace(token, combo.currentText())
+        self.rel_path_edit.setText(rel_path)
+        base = self.base_path_edit.text().rstrip("/\\")
+        rel = rel_path.lstrip("/\\")
+        resolved = os.path.join(base, rel) if base and rel else base or rel
+        self.preview_edit.setText(resolved)
+    def on_shot_struct_changed(self, text):
+        struct_template = self.shot_struct_combo.currentData() or ""
+        for token in self.rel_path_tokens:
+            if token in struct_template:
+                self.token_controls[token].setEnabled(True)
+            else:
+                self.token_controls[token].setEnabled(False)
+        self.update_preview()
+    def autofill_tokens_from_script(self):
+        # Example: parse <shot_name> from script name, fill other tokens as needed
+        import nuke
+        script_name = nuke.root().name()
+        # Simple pattern: SHOT_0010_description_comp_v01.nk
+        import re
+        m = re.search(r"([A-Za-z]+_\d{4})", script_name)
+        if m:
+            self.token_controls["<shot_name>"].setCurrentText(m.group(1))
+        # Optionally parse <version> from vXX or vXXX
+        m2 = re.search(r"v(\d{2,4})", script_name)
+        if m2:
+            self.token_controls["<version>"].setCurrentText(f"v{m2.group(1)}")
+        # You can add more parsing logic for <resolution> if needed
+        self.update_preview()
+    def copy_preview_to_clipboard(self):
+        QtWidgets.QApplication.clipboard().setText(self.preview_edit.text())
+    def show_help_dialog(self):
+        QtWidgets.QMessageBox.information(self, "Path Rule Editor Help",
+            """
+<b>Path Rule Editor Help</b><br><br>
+- <b>Base Path</b>: The root directory for all output paths.<br>
+- <b>Shot Structure</b>: Select a template for your project's path structure.<br>
+- <b>Tokens</b>: Fill in values for each token (e.g., &lt;shot_name&gt;, &lt;resolution&gt;, &lt;version&gt;).<br>
+- <b>Auto-fill from Script</b>: Attempts to fill tokens from the current Nuke script name.<br>
+- <b>Copy</b>: Copies the resolved path to your clipboard.<br>
+- <b>Save/Load</b>: Save or load path templates for reuse.<br><br>
+The resolved path preview updates live as you edit.<br>
+            """)
+    def save_template(self):
+        import yaml
+        config = {
+            "base_path": self.base_path_edit.text(),
+            "shot_structure": self.shot_struct_combo.currentText(),
+            "relative_path": self.rel_path_edit.text(),
+            "tokens": {token: combo.currentText() for token, combo in self.token_controls.items()}
+        }
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Path Template", "", "YAML Files (*.yaml);;JSON Files (*.json)")
+        if path:
+            with open(path, "w") as f:
+                if path.endswith(".json"):
+                    import json
+                    json.dump(config, f, indent=2)
+                else:
+                    yaml.dump(config, f, sort_keys=False)
+    def load_template(self):
+        import yaml
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Path Template", "", "YAML Files (*.yaml);;JSON Files (*.json)")
+        if path:
+            with open(path, "r") as f:
+                if path.endswith(".json"):
+                    import json
+                    config = json.load(f)
+                else:
+                    config = yaml.safe_load(f)
+            self.base_path_edit.setText(config.get("base_path", ""))
+            self.rel_path_edit.setText(config.get("relative_path", ""))
+            for token, value in config.get("tokens", {}).items():
+                if token in self.token_controls:
+                    self.token_controls[token].setCurrentText(value)
+            idx = self.shot_struct_combo.findText(config.get("shot_structure", ""))
+            if idx >= 0:
+                self.shot_struct_combo.setCurrentIndex(idx)
+            self.update_preview()

@@ -9,8 +9,6 @@ import sys
 import os
 import nuke # For Nuke specific operations if needed directly
 from PySide6 import QtWidgets, QtCore, QtGui
-from PySide6.QtSvgWidgets import QSvgWidget
-from PySide6 import QtSvg
 from functools import partial
 
 # Assuming Validator package is in sys.path or PYTHONPATH
@@ -21,16 +19,6 @@ from nuke_validator import NukeValidator
 def create_colored_pixmap(color, size=20):
     pixmap = QtGui.QPixmap(size, size)
     pixmap.fill(color)
-    return pixmap
-
-# Helper to load SVG icon as QPixmap
-def load_svg_icon(path, size=18):
-    renderer = QtSvg.QSvgRenderer(path)
-    pixmap = QtGui.QPixmap(size, size)
-    pixmap.fill(QtCore.Qt.GlobalColor.transparent)
-    painter = QtGui.QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
     return pixmap
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -104,14 +92,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.statusBar().showMessage("Ready")
 
-        # Define status icons using SVGs
+        # Define status icons using PNGs
         icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+        def load_png_icon(path, size=16):
+            pixmap = QtGui.QPixmap(path)
+            if not pixmap.isNull():
+                return pixmap.scaled(size, size, QtCore.Qt.AspectRatioMode.KeepAspectRatio, QtCore.Qt.TransformationMode.SmoothTransformation)
+            return QtGui.QPixmap(size, size)
         self.status_icons = {
-            "success": load_svg_icon(os.path.join(icon_dir, "success.svg")),
-            "warning": load_svg_icon(os.path.join(icon_dir, "warning.svg")),
-            "error": load_svg_icon(os.path.join(icon_dir, "error.svg")),
-            "info": load_svg_icon(os.path.join(icon_dir, "info.svg")),
-            "default": load_svg_icon(os.path.join(icon_dir, "info.svg")),
+            "success": load_png_icon(os.path.join(icon_dir, "success.png")),
+            "warning": load_png_icon(os.path.join(icon_dir, "warning.png")),
+            "error": load_png_icon(os.path.join(icon_dir, "error.png")),
+            "info": load_png_icon(os.path.join(icon_dir, "info.png")),
+            "default": load_png_icon(os.path.join(icon_dir, "info.png")),
         }
 
     def toggle_rules_editor(self, checked):
@@ -189,7 +182,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 node_color = border_color
                 node_name = issue_data.get('node', 'N/A')
                 rule_type = issue_data.get('type', 'Issue')
+                # Show token name if present
+                token = issue_data.get('token')
                 rule_name = f"{rule_type} on <b style='color:{node_color};'>{node_name}</b>"
+                if token:
+                    rule_name = f"<b>{token}</b> - {rule_name}"
                 rule_item_widget = RuleItemWidget(rule_name)
                 rule_item_widget.name_label.setText(rule_name)
                 details = f"<div style='text-align:justify; line-height:1.4;'><b>Current:</b> <span style='color:{node_color};'>{issue_data.get('current', '')}</span>"
@@ -205,11 +202,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 rule_item_widget.setStyleSheet(f"background:#fff; border-left:5px solid {border_color}; border-radius:6px; padding:6px 6px 6px 12px; margin-bottom:4px;")
                 rule_item_widget.name_label.setStyleSheet("font-weight:bold; font-size:13px; color:#222;")
                 rule_item_widget.status_label.setStyleSheet("color:#222; font-size:11px;")
+                # Tooltip for token issues
+                if token and 'tooltip' in issue_data:
+                    rule_item_widget.setToolTip(issue_data['tooltip'])
                 if node_name and node_name != 'N/A':
                     goto_btn = QtWidgets.QPushButton("Go to Node")
                     goto_btn.setStyleSheet(f"padding:1px 8px; border-radius:5px; background:{node_color}; color:white; font-weight:bold; font-size:10px;")
                     goto_btn.clicked.connect(partial(self.goto_node, node_name))
                     rule_item_widget.layout().addWidget(goto_btn)
+                # Auto-Fix button for token issues
+                if issue_data.get('auto_fix'):
+                    autofix_btn = QtWidgets.QPushButton("Auto-Fix")
+                    autofix_btn.setStyleSheet("padding:1px 8px; border-radius:5px; background:#388e3c; color:white; font-weight:bold; font-size:10px;")
+                    autofix_btn.clicked.connect(self.run_autofix)
+                    rule_item_widget.layout().addWidget(autofix_btn)
                 self.results_list_widget.addItem(list_item)
                 self.results_list_widget.setItemWidget(list_item, rule_item_widget)
                 list_item.setSizeHint(rule_item_widget.sizeHint())
@@ -234,6 +240,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     nuke.showDag(node)
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Node Navigation Error", f"Could not navigate to node '{node_name}': {e}")
+
+    def run_autofix(self):
+        fixed = self.validator.fix_issues()
+        self.run_validation()
+        QtWidgets.QMessageBox.information(self, "Auto-Fix", f"Auto-fix applied to {fixed} issues.")
 
 _main_window_instance = None
 # This function will be called by your menu.py as "Validator.launch_validator_for_nuke()"

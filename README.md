@@ -154,6 +154,33 @@ node_expressions:
     severity: "warning"
 ```
 
+## Advanced Token Logic & Auto-Fix
+
+- Each filename/path token (e.g., <shotNumber>, <version>) is validated using rules in rules.yaml.
+- Per-token issues are shown in the UI with tooltips and auto-fix buttons where possible (e.g., padding, case).
+- Click 'Auto-Fix' to automatically correct issues like zero-padding or invalid values.
+
+## Rule Versioning & Import/Export
+
+- Each rule section in rules.yaml now has a version field.
+- You can import/export rule sets for sharing between projects.
+
+## User Experience & Workflow
+
+- Drag-and-drop tokens in the filename/path editors.
+- Recent and favorite templates for quick access.
+- Contextual help and tooltips for all controls.
+
+## Validation Coverage & Reporting
+
+- Validation report includes which nodes/rules were checked, skipped, and why.
+- Export results as HTML or CSV for review.
+
+## Documentation & Onboarding
+
+- In-app documentation and quick start guide available from the UI.
+- Tooltips and help dialogs for all major controls.
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
