@@ -1,0 +1,155 @@
+# Nuke Validator Dropdown Options
+# This file defines the possible values for dropdowns in the UI
+
+# General severity options applicable to many rules
+severity_options:
+  - "error"
+  - "warning"
+  - "info"
+  - "ignore" # Option to disable a check
+
+file_paths:
+  relative_path_required_options: [true, false]
+  # The 'naming_pattern_regex_examples' are no longer used by the UI.
+  # The regex is now dynamically constructed from a template and token definitions.
+  # The 'filename_template' and 'filename_tokens' are now stored in rules.yaml.
+  # Token definitions for dynamic regex builder UI (complex UI feature)
+  # naming_tokens:
+  #   sequence: { display_name: "Sequence (e.g., WTFB)", type: "enum", values: ["WTFB", "KITC", "IGB", "LIFF", "SOME", "OLNT", "ATBM"], regex_part_template: "({values_joined_pipe})" }
+  #   shotNumber: { display_name: "Shot Number (e.g., 0010)", type: "regex_pattern", default_pattern: "\\d{4}", regex_part_template: "({pattern})" }
+  #   description: { display_name: "Description (e.g., comp)", type: "enum", values: ["concept", "layout", "comp", "previz", "roto", "dmp"], regex_part_template: "({values_joined_pipe})" }
+  #   # ... and so on for all tokens from the user's example
+  #   version: { display_name: "Version (e.g., v001)", type: "regex_pattern", default_pattern: "v\\d{3}", regex_part_template: "({pattern})" }
+  #   frame_padding: { display_name: "Frame Padding (e.g., %04d)", type: "regex_pattern", default_pattern: "\\%0\\dd", regex_part_template: "({pattern})" } # Actual padding number varies
+  #   extension: { display_name: "Extension (e.g., exr)", type: "enum", values: ["exr", "png", "jpg", "mov", "nk"], regex_part_template: "\\.({values_joined_pipe})" }
+
+frame_range: # For root settings
+  # min_frames_options: [1, 10, 50, 100]
+  # start_frame_options: [1, 101, 1001]
+  # end_frame_options: [100, 250, 1200]
+  # No specific dropdowns requested beyond what's in rules.yaml
+  # Using null for an empty entry. Add specific options here if needed later.
+  options: null
+
+node_integrity:
+  check_disabled_nodes_options: [true, false]
+
+write_node_resolution:
+  allowed_formats_options:
+    Default:
+      - "HD_1080"
+      - "2K_Super_35_full-ap"
+      - "4K_Super_35_full-ap"
+      - "UHD_4K"
+      - "1K_Super_35_full-ap"
+    Sphere:
+      - "4000 4000 1.0 4K LL180"
+      - "6000 6000 1.0 6K LL180"
+      - "8000 8000 1.0 8K LL180"
+      - "10000 10000 1.0 10K LL180"
+      - "12000 12000 1.0 12K LL180"
+
+colorspaces: # For Read and Write nodes
+  allowed_options:
+    Nuke Default:
+      - "default (sRGB)"
+      - "default (scene_linear)"
+      - "sRGB"
+      - "rec709"
+      - "linear"
+    ACES:
+      - "ACES - ACES2065-1"
+      - "ACES - ACEScg"
+    Input:
+      - "Input - ARRI - V3 LogC (EI800) - Alexa"
+      - "Input - RED - Log3G10 - REDWideGamutRGB"
+      - "Input - Sony - SLog3 - SGamut3.Cine"
+      - "Input - sRGB"
+      - "Input - Rec.709"
+    Output:
+      - "Output - sRGB"
+      - "Output - Rec.709"
+      - "Output - Rec.2020"
+      - "Output - P3-DCI"
+    Utility:
+      - "Utility - Linear - sRGB"
+      - "Utility - Raw"
+      - "Utility - Log"
+  channels: # For Write Nodes
+    require_rgba_options: [true, false]
+    warn_on_rgb_only_options: [true, false]
+    warn_on_extra_channels_options: [true, false]
+    # UI could also list common channel selections like 'rgba', 'rgb', 'alpha', 'depth', etc.
+    channel_selection_options: ["rgba", "rgb", "alpha", "all"]
+
+
+
+render_settings: # For Write nodes
+  # These are highly dependent on the 'file_type' knob of the Write node.
+  # The UI would need to dynamically show relevant options.
+  file_type_options: ["exr", "jpg", "png", "mov"]
+  exr:
+    datatype_options: ["16 bit half", "32 bit float", "32 bit int (unsigned)"]
+    compression_options: # Nuke EXR compression names can be verbose
+      - "none"
+      - "Zip (1 scanline)"
+      - "PIZ Wavelet (32 scanlines)"
+      - "DWAA (lossy)"
+      - "DWAB (lossy)"
+  mov:
+    codec_options: # Common QuickTime codecs in Nuke
+      - "Apple ProRes 422 HQ"
+      - "Apple ProRes 4444 XQ"
+      - "H.264"
+  jpg:
+    _jpeg_quality_options: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] # Knob is '_jpeg_quality'
+    _jpeg_sub_sampling_options: ["4:4:4", "4:2:2", "4:2:0", "4:1:1"] # Knob is '_jpeg_sub_sampling'
+
+versioning: # For Write nodes
+  require_version_token_options: [true, false]
+  version_token_regex_examples:
+    - "_v(\\d+)"    # Matches _v1, _v01, _v001 etc. Captures number.
+    - "_v(\\d{3})"  # Matches _v001, _v123. Captures three digits.
+    - "[._-]v(\\d+)" # Matches .v1, _v1, -v1. Captures number.
+  # match_nuke_script_version_options: [true, false]
+
+bounding_boxes: # Kept from original
+  # No specific dropdowns beyond severity, which is global.
+  # No specific dropdowns beyond severity, which is global.
+  options: null
+
+node_dependencies: # Kept from original
+  # UI would list node classes for 'required'
+  node_class_options: ["Read", "Write"]
+
+node_names: # Kept from original
+  pattern_examples:
+    - "^[A-Za-z0-9_]+$" # Alphanumeric and underscore
+    - "^[A-Z][A-Za-z0-9_]*$" # Starts with uppercase, then alphanumeric/underscore
+  options: null # No specific dropdowns beyond pattern_examples and severity.
+
+node_parameters: # Generic
+  # This is too broad for general dropdowns. UI would need to be context-aware
+  # or allow user to specify node_class, parameter_name, and then allowed_values.
+  # Example for a specific parameter:
+  # Read_file_type_options: [".exr", ".dpx", ".cin", ".tif", ".png", ".jpg"]
+  options: null # Too broad for general dropdowns.
+
+node_connections: # Kept from original
+  # UI would list node classes for 'allowed_nodes'
+  # node_class_options already defined under node_dependencies
+  options: null # Uses node_class_options already defined.
+
+viewer_nodes:
+  warn_if_ip_active_options: [true, false]
+
+expressions_errors:
+  check_for_errors_options: [true, false]
+read_file_errors:
+  check_existence_options: [true, false]
+
+# REMOVED SECTIONS:
+# plugin_compatibility
+# performance
+# node_metadata
+# node_expressions (Replaced by expressions_errors)

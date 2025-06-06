@@ -1,0 +1,146 @@
+# Nuke Validator Rules
+# This file defines the validation rules for your Nuke scripts
+
+# File Path and Naming Rules
+file_paths:
+  relative_path_required: true # true or false
+  severity_relative_path: "warning"
+  # Example for dynamic naming convention (regex will be built from this in future)
+  # naming_pattern_template: "<sequence><shotNumber>_<description>_<pixelMappingName><resolution>_<colorspace><gamma>_<fps>_<version>.<frame_padding>.<extension>"
+  # For now, a direct regex:
+  naming_pattern_regex: "^[A-Z]{4}\\d{4}_\\w+(_(LL180|LL360))?(_(1K|2K|4K|6K|8K|19K|12K))?_\\w+(_\\d{4})?_v\\d{3}\\.\\%0\\dd\\.(exr|png|jpg|mov|nk)$" # Example, needs refinement
+  # naming_tokens: # For future dynamic regex generation
+  #   sequence: { values: ["WTFB", "KITC", "IGB", "LIFF", "SOME", "OLNT", "ATBM"], regex_part: "([A-Z]{4})" }
+  #   shotNumber: { regex_part: "(\\d{4})" }
+  #   description: { values: ["concept", "layout", "comp", "previz", "roto", "dmp"], regex_part: "(\\w+)" }
+  #   pixelMappingName: { values: ["LL180", "LL360"], optional: true, regex_part: "(_(LL180|LL360))?" }
+  #   resolution: { values: ["1K", "2K", "4K", "6K", "8K", "19K", "12K"], optional: true, regex_part: "(_(1K|2K|4K|6K|8K|19K|12K))?" }
+  #   colorspaceGamma: { regex_part: "(\\w+)" } # Combined for simplicity in regex, could be split
+  #   fps: { values: ["2997", "5994"], optional: true, regex_part: "(_\\d{4})?" }
+  #   version: { regex_part: "(v\\d{3})" }
+  #   frame_padding: { regex_part: "(\\%0\\dd)" } # Placeholder, actual padding number varies
+  #   extension: { values: ["exr", "png", "jpg", "mov", "nk"], regex_part: "\\.(exr|png|jpg|mov|nk)" }
+  severity_naming_pattern: "warning"
+
+# Frame Range and Frame Rate (No changes requested, keeping existing structure if relevant)
+frame_range: # This was for root, keeping for now.
+  # min_frames: 10 # Example
+  # start_frame: 1001 # Example
+  # end_frame: 1100 # Example
+  severity: "warning"
+
+# Node Integrity
+node_integrity:
+  check_disabled_nodes: true
+  severity_disabled_nodes: "warning"
+  # check_unconnected_mandatory_inputs: true # Future addition
+  # severity_unconnected_inputs: "error" # Future addition
+
+# Resolution and Aspect Ratio (Now specific to Write Node output)
+write_node_resolution:
+  allowed_formats: ["HD_1080", "2K_Super_35_full-ap", "4K_Super_35_full-ap"] # Nuke format names
+  severity: "warning"
+
+# Color Space
+colorspaces: # For Read and Write nodes
+  Read:
+    allowed: ["sRGB", "Rec.709", "ACEScg", "ACES - ACEScg", "Input - sRGB", "Input - Rec.709"] # Add more as needed from dropdown
+    severity: "warning"
+  Write:
+    allowed: ["sRGB", "Rec.709", "ACEScg", "ACES - ACEScg", "Output - sRGB", "Output - Rec.709"] # Add more as needed
+    severity: "warning"
+# color_space_consistency: # This was a separate check, can be kept or merged logic
+#   severity: "warning"
+
+# Channels and Layer Management (for Write Nodes)
+channels:
+  Write:
+    require_rgba: true
+    warn_on_rgb_only: true
+    warn_on_extra_channels: true # e.g. if 'all' is selected or custom layers beyond rgba
+    severity: "warning"
+
+# Render Settings (for Write nodes, file type specific)
+render_settings:
+  Write:
+    file_type_rules:
+      exr:
+        datatype: ["16 bit half", "32 bit float"] # Knob: 'datatype'
+        compression: ["Zip (1 scanline)", "ZIP (1 scanline)", "PIZ Wavelet (32 scanlines)"] # Knob: 'compression' (values can vary)
+        # Example for specific EXR compression knob if it exists:
+        # exrCompression: ["zips", "zip", "piz"] # This is often part of the 'compression' knob value string
+      mov:
+        # Nuke's MOV writer knobs are 'codec' and then codec-specific ones
+        codec: ["avc1", "apch", "apcn", "apcs", "apco", "ap4h"] # Example H.264, ProRes variations
+        # For ProRes 4444, you'd check 'codec' for 'ap4h' (ProRes 4444) or 'ap4x' (ProRes 4444 XQ)
+        # This needs to be more dynamic or have very specific rules per codec.
+        # Example for a specific ProRes check (assuming 'codec' is 'ap4h'):
+        # prores_profile: ["ProRes 4444"] # This is not a direct knob, logic would be: if codec is ap4h, it's 4444.
+      jpg:
+        # JPG specific settings, e.g., quality
+        _jpeg_quality: [0.8, 0.9, 1.0] # Knob: '_jpeg_quality'
+    severity: "warning" # General severity for this category
+
+# Versioning (for Write nodes)
+versioning:
+  require_version_token: true
+  version_token_regex: "_v(\\d+)" # Captures the version number
+  # match_nuke_script_version: true # Future: Compare with Nuke script's version
+  severity_require_token: "error"
+  # severity_match_script_version: "warning"
+
+# Bounding Boxes (Kept from original)
+bounding_boxes:
+  Read:
+    severity: "warning"
+  Write:
+    severity: "warning"
+
+# Node Dependencies (Kept from original, review if still needed with other changes)
+node_dependencies:
+  Tracker: # Example
+    required: ["Read"]
+    severity: "error"
+#  Write: # Example
+#    required: ["Reformat"] # A more useful rule than Tracker
+#    severity: "warning"
+
+# Node Names (Kept from original)
+node_names:
+  pattern: "^[A-Za-z0-9_]+$" # Allow uppercase
+  severity: "warning"
+
+# Node Parameters (Generic, can be used for various checks)
+node_parameters:
+  Read:
+    # Example: ensure 'premultiplied' is checked for certain file types if needed
+    # premultiplied: { allowed_values: [true], severity: "warning", if_file_type: ["png_with_alpha"] }
+    pass # Add specific parameter checks here if needed beyond other categories
+  Write:
+    pass
+
+# Node Connections (Kept from original)
+node_connections:
+  Merge2: # Nuke default Merge node is Merge2
+    inputs: # Naming of inputs can be 'A', 'B' or by index if preferred
+      A: { allowed_nodes: ["Read", "Grade", "Roto", "Transform", "Merge2"], severity: "warning" }
+      B: { allowed_nodes: ["Read", "Grade", "Roto", "Transform", "Merge2"], severity: "warning" }
+
+# Viewport or Viewer Nodes
+viewer_nodes:
+  warn_if_ip_active: true # Checks 'ip' (use GPU for viewer process) knob
+  severity: "info" # Usually an info or warning, not an error
+
+# Expressions and Script Errors
+expressions_errors:
+  check_for_errors: true # Enables checking knob.hasError()
+  severity: "error" # Expression errors are usually critical
+read_file_errors:
+  check_existence: true # Enables checking if Read node files exist (first frame)
+  severity: "error" # Missing files are critical
+
+# REMOVED SECTIONS:
+# plugin_compatibility
+# performance
+# node_metadata
+# node_expressions (Replaced by expressions_errors)
