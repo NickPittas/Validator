@@ -37,19 +37,54 @@ This document outlines the systematic cleanup of duplicated code in the Nuke Val
 ## Phase 1: Analysis and Preparation
 
 ### Task 1.1: Audit Current Usage
-- [ ] **1.1.1** Search for all references to `FilenameTemplateBuilder` in the codebase
-- [ ] **1.1.2** Search for all references to `SimpleFilenameTemplateBuilder` in the codebase
-- [ ] **1.1.3** Search for all references to `CompactFilenameTemplateBuilder` in the codebase  
-- [ ] **1.1.4** Search for all references to `TableBasedFilenameTemplateBuilder` in the codebase
-- [ ] **1.1.5** Document which classes are actively used vs. legacy/unused
-- [ ] **1.1.6** Identify all instantiation points and their context
+- [x] **1.1.1** Search for all references to `FilenameTemplateBuilder` in the codebase
+- [x] **1.1.2** Search for all references to `SimpleFilenameTemplateBuilder` in the codebase
+- [x] **1.1.3** Search for all references to `CompactFilenameTemplateBuilder` in the codebase
+- [x] **1.1.4** Search for all references to `TableBasedFilenameTemplateBuilder` in the codebase
+- [x] **1.1.5** Document which classes are actively used vs. legacy/unused
+  - **`TableBasedFilenameTemplateBuilder`**: Actively used. This is the most recent and feature-rich builder, intended to be the primary one.
+  - **`SimpleFilenameTemplateBuilder`**: Legacy. Was previously used, but now superseded by the table-based version.
+  - **`CompactFilenameTemplateBuilder`**: Legacy/Unused. Appears to be a variant that is not actively integrated.
+  - **`FilenameTemplateBuilder`**: Legacy/Unused. The original base class, not used directly.
+  - **`FilenameRuleEditor`**: Two versions exist. The second version (around line 4455) is the one being used and developed.
+  - **`SimpleMultiSelectWidget`**: Actively used. It contains critical bug fixes not present in the other version.
+  - **`MultiSelectWidget`**: Legacy. Superseded by `SimpleMultiSelectWidget`.
+- [x] **1.1.6** Identify all instantiation points and their context
+  - **`FilenameRuleEditor`**:
+    - `nuke_validator_ui.py`: Instantiated in the main UI window (`ValidatorWindow.__init__`).
+    - `nuke_validator.py`: Instantiated temporarily in `validate_file_name()` for its validation logic.
+    - `test_validator_functionality.py`: Instantiated for testing purposes.
+  - **`TableBasedFilenameTemplateBuilder`**:
+    - `nuke_validator_ui.py`: Instantiated within `FilenameRuleEditor.__init__`.
+    - `test_validator_functionality.py`: Instantiated for testing purposes.
+  - **`SimpleFilenameTemplateBuilder`**: No direct instantiations found. It was likely assigned to an alias.
+  - **`CompactFilenameTemplateBuilder`**: No instantiations found.
 
 ### Task 1.1.5: Identify ALL Duplicate Classes (CRITICAL)
-- [ ] **1.1.5a** 🚨 **FilenameRuleEditor** - TWO classes found (lines ~800 and ~4455)
+- [x] **1.1.5a** 🚨 **FilenameRuleEditor** - TWO classes found (lines ~800 and ~4455)
 - [ ] **1.1.5b** Search for any other duplicate class definitions in the entire file
-- [ ] **1.1.5c** Use `grep "^class "` to find all class definitions
-- [ ] **1.1.5d** Identify which duplicate classes are being used vs. orphaned
+- [x] **1.c** Use `grep "^class "` to find all class definitions
+- [x] **1.1.5d** Identify which duplicate classes are being used vs. orphaned
+  - **`TableBasedFilenameTemplateBuilder`**: Actively used. This is the most recent and feature-rich builder, intended to be the primary one.
+  - **`SimpleFilenameTemplateBuilder`**: Legacy. Was previously used, but now superseded by the table-based version.
+  - **`CompactFilenameTemplateBuilder`**: Legacy/Unused. Appears to be a variant that is not actively integrated.
+  - **`FilenameTemplateBuilder`**: Legacy/Unused. The original base class, not used directly.
+  - **`FilenameRuleEditor`**: Two versions exist. The second version (around line 4455) is the one being used and developed.
+  - **`SimpleMultiSelectWidget`**: Actively used. It contains critical bug fixes not present in the other version.
+  - **`MultiSelectWidget`**: Legacy. Superseded by `SimpleMultiSelectWidget`.
 - [ ] **1.1.5e** Document the impact of each duplicate (working vs. broken)
+
+**Identified Duplicate Classes:**
+  - **Template Builders:**
+    - `FilenameTemplateBuilder` (Legacy Base Class)
+    - `SimpleFilenameTemplateBuilder` (Legacy)
+    - `CompactFilenameTemplateBuilder` (Legacy)
+    - `TableBasedFilenameTemplateBuilder` (Primary)
+  - **Rule Editors:**
+    - `FilenameRuleEditor` (Duplicate definition exists)
+  - **Widgets:**
+    - `MultiSelectWidget` (Legacy)
+    - `SimpleMultiSelectWidget` (Primary, with bug fixes)
 
 ### Task 1.2: Analyze MultiSelect Widget Usage
 - [ ] **1.2.1** Find all references to `MultiSelectWidget` class
@@ -223,4 +258,4 @@ This document outlines the systematic cleanup of duplicated code in the Nuke Val
   - 1 multiselect widget (MultiSelectWidget)  
   - 1 duplicate FilenameRuleEditor class
 - **Maintenance Burden:** Significantly reduced
-- **User Experience:** Improved consistency, no functional changes 
+- **User Experience:** Improved consistency, no functional changes
