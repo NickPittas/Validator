@@ -1,0 +1,28 @@
+template:
+- name: sequence
+  value: 4
+- name: shotNumber
+  value: 4
+- separator: _
+- name: description
+  value: null
+- separator: _
+- name: pixelMappingName
+  value: LL180
+- name: resolution
+  value: null
+- separator: _
+- name: colorspaceGamma
+  value:
+  - r709g24
+  - acescglin
+- separator: _
+- name: fps
+  value: '2997'
+- separator: _
+- name: version
+  value: null
+- name: extension
+  value:
+  - jpg
+regex: ^[A-Z]4\d4_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_(?:LL180)\d{1,2}k_(r709g24|acescglin)_(2997)_v\d{2,3}(jpg)$

@@ -39,10 +39,22 @@ class NukeValidator:
         Args:
             rules_file: Path to rules file (JSON or YAML)
         """
+        self.rules_file_path = rules_file
         self.rules = self._load_rules(rules_file) if rules_file else {}
         self.issues = []
         self.fixes = []
         self.node_stats = {}
+        
+    def set_rules_file_path(self, rules_file_path: str):
+        """
+        Set a new rules file path and reload the rules
+        
+        Args:
+            rules_file_path: Path to the new rules file
+        """
+        self.rules_file_path = rules_file_path
+        self.rules = self._load_rules(rules_file_path)
+        print(f"Validator rules updated from: {rules_file_path}")
         
     def _load_rules(self, rules_file: str) -> Dict:
         """
@@ -152,7 +164,7 @@ class NukeValidator:
                 
     def _check_colorspaces(self, nodes: List[nuke.Node]):
         """
-        Check colorspaces on Read and Write nodes
+        Check colorspace settings for Read and Write nodes with intelligent matching
         
         Args:
             nodes: List of Nuke nodes
@@ -163,7 +175,7 @@ class NukeValidator:
         for node in nodes:
             if node.Class() == 'Read' and 'Read' in self.rules['colorspaces']:
                 colorspace = node['colorspace'].value()
-                if colorspace not in self.rules['colorspaces']['Read']['allowed']:
+                if not self._is_colorspace_allowed(colorspace, self.rules['colorspaces']['Read']['allowed']):
                     issue = {
                         'type': 'colorspace',
                         'node': node.name(),
@@ -176,7 +188,7 @@ class NukeValidator:
                     
             elif node.Class() == 'Write' and 'Write' in self.rules['colorspaces']:
                 colorspace = node['colorspace'].value()
-                if colorspace not in self.rules['colorspaces']['Write']['allowed']:
+                if not self._is_colorspace_allowed(colorspace, self.rules['colorspaces']['Write']['allowed']):
                     issue = {
                         'type': 'colorspace',
                         'node': node.name(),
@@ -186,7 +198,154 @@ class NukeValidator:
                         'severity': self.rules['colorspaces']['Write'].get('severity', 'warning')
                     }
                     self.issues.append(issue)
-                    
+    
+    def _is_colorspace_allowed(self, current_colorspace: str, allowed_colorspaces: List[str]) -> bool:
+        """
+        Intelligent colorspace matching that understands similar colorspace names
+        
+        Args:
+            current_colorspace: The current colorspace string
+            allowed_colorspaces: List of allowed colorspace strings
+            
+        Returns:
+            bool: True if current colorspace is considered allowed
+        """
+        # Exact match first
+        if current_colorspace in allowed_colorspaces:
+            return True
+        
+        # Normalize strings for comparison (lowercase, remove spaces/dashes)
+        def normalize_colorspace(cs):
+            return cs.lower().replace(' ', '').replace('-', '').replace('_', '')
+        
+        current_norm = normalize_colorspace(current_colorspace)
+        
+        # Define colorspace aliases and patterns
+        colorspace_patterns = {
+            'acescg': ['acescg', 'aces', 'acesCg', 'aces-acescg', 'acesapplied'],
+            'linear': ['linear', 'scenelinear', 'scene_linear', 'scenereferred', 'lin'],
+            'srgb': ['srgb', 'sRGB', 'inputsrgb', 'input-srgb', 'outputsrgb', 'output-srgb'],
+            'rec709': ['rec709', 'rec.709', 'inputrec709', 'input-rec709', 'outputrec709', 'output-rec709', 'r709'],
+            'log': ['log', 'logc', 'alog', 'arri'],
+            'p3': ['p3', 'p3d65', 'displayp3', 'dci-p3'],
+            'rec2020': ['rec2020', 'rec.2020', 'bt2020', 'bt.2020']
+        }
+        
+        # Check if current colorspace matches any pattern group
+        for pattern_group, patterns in colorspace_patterns.items():
+            if any(pattern in current_norm for pattern in patterns):
+                # Check if any allowed colorspace also matches this pattern group
+                for allowed in allowed_colorspaces:
+                    allowed_norm = normalize_colorspace(allowed)
+                    if any(pattern in allowed_norm for pattern in patterns):
+                        return True
+        
+        # Check for partial matches with key terms
+        key_terms = ['acescg', 'linear', 'srgb', 'rec709', 'log', 'p3', 'rec2020']
+        current_terms = [term for term in key_terms if term in current_norm]
+        
+        if current_terms:
+            for allowed in allowed_colorspaces:
+                allowed_norm = normalize_colorspace(allowed)
+                # If they share at least one key term, consider it a match
+                allowed_terms = [term for term in key_terms if term in allowed_norm]
+                if any(term in allowed_terms for term in current_terms):
+                    return True
+        
+        return False
+    def _validate_filename_detailed(self, filename, pattern_str):
+        """
+        Provide detailed validation feedback using the sophisticated template-based validation
+        from the UI system instead of basic regex checking.
+        """
+        try:
+            # Import the sophisticated validation from the UI
+            from nuke_validator_ui import FilenameRuleEditor
+            
+            # Check if we have filename tokens in the rules (from the UI system)
+            filename_tokens = self.rules.get('file_paths', {}).get('filename_tokens', [])
+            
+            if filename_tokens:
+                # Create a temporary FilenameRuleEditor to use its validation logic
+                temp_editor = FilenameRuleEditor()
+                
+                # Load the token configuration from rules
+                for token_cfg in filename_tokens:
+                    if "name" in token_cfg:
+                        # Find the token definition
+                        from nuke_validator_ui import FILENAME_TOKENS
+                        token_def = next((t for t in FILENAME_TOKENS if t["name"] == token_cfg["name"]), None)
+                        if token_def:
+                            temp_editor.template_builder.add_token(token_def)
+                            
+                            # Set the control values from the saved configuration
+                            if temp_editor.template_builder.token_widgets:
+                                widget = temp_editor.template_builder.token_widgets[-1]
+                                if hasattr(widget, 'token_configs') and len(widget.token_configs) > 0:
+                                    # Update the token config with saved values
+                                    config = widget.token_configs[-1]
+                                    config["value"] = token_cfg.get("value")
+                                    config["separator"] = token_cfg.get("separator", "_")
+                
+                # Generate the regex pattern
+                temp_editor.update_regex()
+                
+                # Use the sophisticated validation from the UI
+                detailed_errors = temp_editor.get_validation_errors(filename)
+                
+                if detailed_errors:
+                    return detailed_errors
+                else:
+                    return []  # No errors found
+            
+            # Fallback to basic validation if no template configuration available
+            return self._basic_filename_validation(filename, pattern_str)
+            
+        except ImportError:
+            # If UI components aren't available, fall back to basic validation
+            return self._basic_filename_validation(filename, pattern_str)
+        except Exception as e:
+            return [f"Validation system error: {str(e)}"]
+    
+    def _basic_filename_validation(self, filename, pattern_str):
+        """
+        Basic fallback validation for when the sophisticated UI validation isn't available.
+        """
+        import re
+        errors = []
+        
+        if not pattern_str or not filename:
+            return ["No regex pattern defined"]
+            
+        try:
+            # First try full match
+            if re.match(pattern_str, filename):
+                return []  # No errors
+                
+            # Basic pattern analysis
+            print(f"[BasicValidation] Analyzing filename: {filename}")
+            print(f"[BasicValidation] Against pattern: {pattern_str}")
+            
+            # Common issue 1: LL18012k should be LL180_12k
+            ll_resolution_match = re.search(r'LL(\d+)(\d+k)', filename)
+            if ll_resolution_match:
+                ll_part = ll_resolution_match.group(1)
+                res_part = ll_resolution_match.group(2)
+                if ll_part in ['180', '360'] and res_part in ['1k', '2k', '4k', '6k', '8k', '12k', '16k', '19k']:
+                    full_match = ll_resolution_match.group(0)
+                    suggested = f"LL{ll_part}_{res_part}"
+                    errors.append(f"Pixel mapping format: '{full_match}' should be '{suggested}' (needs separator)")
+                    return errors  # Return early with this specific error
+            
+            # If no specific pattern detected, provide general feedback
+            errors.append(f"Filename '{filename}' doesn't match expected pattern. Check token order and separators.")
+            return errors
+            
+        except re.error as e:
+            return [f"Regex error: {str(e)}"]
+        except Exception as e:
+            return [f"Validation error: {str(e)}"]
+
     def _check_file_paths_and_naming(self, nodes: List[nuke.Node]):
         """
         Check file paths (relative/absolute) and naming conventions for Write nodes.
@@ -242,21 +401,29 @@ class NukeValidator:
                 try:
                     print(f"[Validator] Checking filename '{filename}' against regex: {pattern_str}")
                     if not re.match(pattern_str, filename):
-                        # Per-token validation (advanced logic)
-                        token_issues = self._validate_tokens(filename, token_defs)
-                        if token_issues:
-                            for t_issue in token_issues:
-                                t_issue['node'] = node.name()
-                                t_issue['node_type'] = 'Write'
-                                t_issue['severity'] = severity_naming
-                                self.issues.append(t_issue)
-                        else:
+                        # Use detailed validation instead of generic regex error
+                        detailed_errors = self._validate_filename_detailed(filename, pattern_str)
+                        
+                        if detailed_errors:
+                            # Create specific error for the most important issues
+                            primary_error = detailed_errors[0]  # Take the first/most important error
                             self.issues.append({
                                 'type': 'naming_convention_violation',
                                 'node': node.name(),
                                 'node_type': 'Write',
                                 'current': filename,
-                                'expected': f"To match regex: {pattern_str}",
+                                'expected': primary_error,
+                                'severity': severity_naming,
+                                'details': detailed_errors  # Include all errors for detailed view
+                            })
+                        else:
+                            # Fallback if detailed validation doesn't catch anything
+                            self.issues.append({
+                                'type': 'naming_convention_violation',
+                                'node': node.name(),
+                                'node_type': 'Write',
+                                'current': filename,
+                                'expected': "Filename format validation issues",
                                 'severity': severity_naming
                             })
                 except re.error as e:
@@ -636,29 +803,34 @@ class NukeValidator:
         """
         Strict check for errors in expressions and Read node file existence.
         """
-        # Check expressions for errors
+        # Check for expression errors in knobs
         if self.rules.get('expressions_errors', {}).get('check_for_errors', False):
             severity = self._get_rule_severity('expressions_errors')
             for node in nodes:
                 for knob_name in node.knobs():
-                    knob = node[knob_name]
-                    if knob.hasExpression():
-                        # Check for Nuke's built-in error reporting on the knob
-                        if knob.hasError(): # Nuke knobs have a hasError() method
-                             self.issues.append({
-                                'type': 'expression_error',
-                                'node': node.name(),
-                                'node_type': node.Class(),
-                                'knob': knob_name,
-                                'current': knob.expression(),
-                                'expected': 'No error in expression',
-                                'severity': severity
-                            })
-                        # A more aggressive check could try to evaluate, but this is risky
-                        # try:
-                        #     knob.value() # Evaluating might trigger errors
-                        # except Exception as e:
-                        #     self.issues.append(...)
+                    try:
+                        knob = node[knob_name]
+                        if knob.hasExpression():
+                            # Check for Nuke's built-in error reporting on the knob
+                            # Only call hasError() if the method exists for this knob type
+                            if hasattr(knob, 'hasError') and knob.hasError():
+                                 self.issues.append({
+                                    'type': 'expression_error',
+                                    'node': node.name(),
+                                    'node_type': node.Class(),
+                                    'knob': knob_name,
+                                    'current': knob.expression(),
+                                    'expected': 'No error in expression',
+                                    'severity': severity
+                                })
+                            # A more aggressive check could try to evaluate, but this is risky
+                            # try:
+                            #     knob.value() # Evaluating might trigger errors
+                            # except Exception as e:
+                            #     self.issues.append(...)
+                    except (RuntimeError, ValueError, AttributeError) as e:
+                        # Skip knobs that can't be accessed or don't support the operations
+                        continue
 
         # Check Read node file existence
         if self.rules.get('read_file_errors', {}).get('check_existence', False):

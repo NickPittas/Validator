@@ -12,7 +12,7 @@ from PySide6 import QtWidgets, QtCore, QtGui
 from functools import partial
 
 # Assuming Validator package is in sys.path or PYTHONPATH
-from nuke_validator_ui import RulesEditorWidget, RuleItemWidget
+from nuke_validator_ui import RulesEditorWidget, ValidationResultsTable
 from nuke_validator import NukeValidator
 
 # Helper to create simple colored pixmaps for status icons
@@ -47,6 +47,102 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("Nuke Validator - Integrated")
         self.setMinimumSize(1000, 700)
         
+        # Apply dark theme styling to match Nuke
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #393939;
+                color: #e0e0e0;
+            }
+            
+            QWidget {
+                background-color: #393939;
+                color: #e0e0e0;
+            }
+            
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a4a4a, stop:1 #3a3a3a);
+                color: #e0e0e0;
+                border: 1px solid #666666;
+                border-radius: 3px;
+                padding: 6px 12px;
+                font-size: 11px;
+                min-height: 20px;
+            }
+            
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #5a5a5a, stop:1 #4a4a4a);
+                border: 1px solid #777777;
+            }
+            
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a3a3a, stop:1 #2a2a2a);
+                border: 1px solid #555555;
+            }
+            
+            QPushButton:checked {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a9eff, stop:1 #3a8eef);
+                border: 1px solid #2a7edf;
+                color: #ffffff;
+            }
+            
+            QComboBox {
+                background: #3a3a3a;
+                color: #e0e0e0;
+                border: 1px solid #666666;
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: 11px;
+                min-height: 16px;
+            }
+            
+            QComboBox:hover {
+                border: 1px solid #777777;
+                background: #4a4a4a;
+            }
+            
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+            }
+            
+            QComboBox::down-arrow {
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 4px solid #e0e0e0;
+                margin-right: 6px;
+            }
+            
+            QComboBox QAbstractItemView {
+                background: #3a3a3a;
+                color: #e0e0e0;
+                selection-background-color: #4a9eff;
+                border: 1px solid #666666;
+            }
+            
+            QLabel {
+                color: #e0e0e0;
+                background: transparent;
+            }
+            
+            QSplitter::handle {
+                background: #666666;
+                width: 2px;
+                height: 2px;
+            }
+            
+            QSplitter::handle:hover {
+                background: #777777;
+            }
+            
+            QStatusBar {
+                background: #2a2a2a;
+                color: #e0e0e0;
+                border-top: 1px solid #555555;
+            }
+        """)
+        
         main_widget = QtWidgets.QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QtWidgets.QVBoxLayout(main_widget)
@@ -56,6 +152,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.run_validation_button = QtWidgets.QPushButton("Run Validation")
         self.run_validation_button.clicked.connect(self.run_validation)
         controls_layout.addWidget(self.run_validation_button)
+
+        # Rules YAML selector dropdown
+        controls_layout.addWidget(QtWidgets.QLabel("Rules YAML:"))
+        self.yaml_selector_combo = QtWidgets.QComboBox()
+        self.yaml_selector_combo.setMinimumWidth(200)
+        self.yaml_selector_combo.setToolTip("Select which rules YAML file to use for validation")
+        controls_layout.addWidget(self.yaml_selector_combo)
+        
+        # Populate YAML selector and connect signals
+        self._populate_yaml_selector()
+        self.yaml_selector_combo.currentTextChanged.connect(self._on_yaml_selected)
 
         self.edit_rules_button = QtWidgets.QPushButton("Edit Rules")
         self.edit_rules_button.setCheckable(True) # Make it a toggle button
@@ -76,16 +183,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rules_editor_widget.load_rules_from_yaml() # Load its content
         self.splitter.addWidget(self.rules_editor_widget)
         self.rules_editor_widget.setVisible(False) # Initially hidden
+        
+        # Connect rules editor to main window for YAML updates
+        self.rules_editor_widget.parent = lambda: self
 
         results_container = QtWidgets.QWidget()
         results_layout = QtWidgets.QVBoxLayout(results_container)
         results_layout.setContentsMargins(0,0,0,0)
         
         results_label = QtWidgets.QLabel("Validation Results:")
+        results_label.setStyleSheet("QLabel { color: #e0e0e0; font-weight: bold; font-size: 12px; }")
         results_layout.addWidget(results_label)
         
-        self.results_list_widget = QtWidgets.QListWidget()
-        results_layout.addWidget(self.results_list_widget)
+        # Use the new ValidationResultsTable instead of QListWidget
+        self.results_table = ValidationResultsTable()
+        results_layout.addWidget(self.results_table)
         
         self.splitter.addWidget(results_container)
         self.splitter.setSizes([400, 600])
@@ -122,10 +234,9 @@ class MainWindow(QtWidgets.QMainWindow):
             # if len(current_sizes) == 2 and current_sizes[0] > 0 : # if editor was visible
             #    self.splitter.setSizes([0, current_sizes[0] + current_sizes[1]])
 
-
     def run_validation(self):
         self.statusBar().showMessage("Running validation...")
-        self.results_list_widget.clear()
+        self.results_table.clear_results()
 
         # Always reload rules from YAML before validating
         if hasattr(self.validator, 'rules_file_path') and self.validator.rules_file_path:
@@ -133,18 +244,11 @@ class MainWindow(QtWidgets.QMainWindow):
         elif not self.validator.rules:
             print("Warning: No rules loaded in validator and no rules file path set for reloading.")
             self.statusBar().showMessage("Validation failed: No rules loaded.")
-            list_item = QtWidgets.QListWidgetItem()
-            rule_item_widget = RuleItemWidget("Setup Error")
-            rule_item_widget.name_label.setText("<b style='color:#b00020;'>Validator Setup</b>")
-            rule_item_widget.status_label.setText("No rules loaded and no rules file path set.")
-            rule_item_widget.status_icon.setPixmap(self.status_icons.get("error"))
-            rule_item_widget.status_icon.setFixedSize(18, 18)
-            rule_item_widget.setStyleSheet("background:#fff; border-left:5px solid #b00020; border-radius:6px; padding:6px 6px 6px 12px; margin-bottom:4px;")
-            rule_item_widget.name_label.setStyleSheet("font-weight:bold; font-size:13px; color:#222;")
-            rule_item_widget.status_label.setStyleSheet("color:#222; font-size:11px;")
-            self.results_list_widget.addItem(list_item)
-            self.results_list_widget.setItemWidget(list_item, rule_item_widget)
-            list_item.setSizeHint(rule_item_widget.sizeHint())
+            self.results_table.add_validation_result(
+                "Setup Error", 
+                "error", 
+                "No rules loaded and no rules file path set."
+            )
             return
 
         try:
@@ -155,70 +259,49 @@ class MainWindow(QtWidgets.QMainWindow):
         success, issues = self.validator.validate_script()
 
         if not issues:
-            list_item = QtWidgets.QListWidgetItem()
-            rule_item_widget = RuleItemWidget("Overall Status")
-            rule_item_widget.name_label.setText("<b style='color:#388e3c;'>Validation Status</b>")
-            rule_item_widget.status_label.setText("<span style='color:#388e3c;'>No issues found!</span>")
-            rule_item_widget.status_icon.setPixmap(self.status_icons.get("success"))
-            rule_item_widget.status_icon.setFixedSize(18, 18)
-            rule_item_widget.progress_bar.setVisible(False)
-            rule_item_widget.setStyleSheet("background:#fff; border-left:5px solid #388e3c; border-radius:6px; padding:6px 6px 6px 12px; margin-bottom:4px;")
-            rule_item_widget.name_label.setStyleSheet("font-weight:bold; font-size:13px; color:#222;")
-            rule_item_widget.status_label.setStyleSheet("color:#222; font-size:11px;")
-            self.results_list_widget.addItem(list_item)
-            self.results_list_widget.setItemWidget(list_item, rule_item_widget)
-            list_item.setSizeHint(rule_item_widget.sizeHint())
+            self.results_table.add_validation_result(
+                "Overall Status",
+                "success", 
+                "No issues found! All validation checks passed."
+            )
             self.statusBar().showMessage("Validation complete: No issues found.", 5000)
         else:
             for issue_data in issues:
-                list_item = QtWidgets.QListWidgetItem()
                 severity = issue_data.get('severity', 'info').lower()
-                border_color = {
-                    'error': '#b00020',
-                    'warning': '#ff9800',
-                    'success': '#388e3c',
-                    'info': '#1976d2'
-                }.get(severity, '#1976d2')
-                node_color = border_color
                 node_name = issue_data.get('node', 'N/A')
                 rule_type = issue_data.get('type', 'Issue')
-                # Show token name if present
+                
+                # Get the details message
+                current_value = issue_data.get('current', '')
+                expected_value = issue_data.get('expected', '')
+                message = issue_data.get('message', '')
+                
+                # Build the details text
+                details_parts = []
+                if message:
+                    details_parts.append(message)
+                if current_value:
+                    details_parts.append(f"Current: {current_value}")
+                if expected_value:
+                    details_parts.append(f"Expected: {expected_value}")
+                
+                details = " | ".join(details_parts) if details_parts else "No additional details"
+                
+                # Create rule name (without HTML formatting for table)
                 token = issue_data.get('token')
-                rule_name = f"{rule_type} on <b style='color:{node_color};'>{node_name}</b>"
                 if token:
-                    rule_name = f"<b>{token}</b> - {rule_name}"
-                rule_item_widget = RuleItemWidget(rule_name)
-                rule_item_widget.name_label.setText(rule_name)
-                details = f"<div style='text-align:justify; line-height:1.4;'><b>Current:</b> <span style='color:{node_color};'>{issue_data.get('current', '')}</span>"
-                if 'expected' in issue_data:
-                    details += f"<br><b>Expected:</b> <span style='color:#222;'>{issue_data.get('expected')}</span>"
-                elif 'allowed' in issue_data:
-                    details += f"<br><b>Allowed:</b> <span style='color:#222;'>{issue_data.get('allowed')}</span>"
-                details += "</div>"
-                rule_item_widget.status_label.setText(details)
-                rule_item_widget.status_icon.setPixmap(self.status_icons.get(severity, self.status_icons["default"]))
-                rule_item_widget.status_icon.setFixedSize(18, 18)
-                rule_item_widget.progress_bar.setVisible(False)
-                rule_item_widget.setStyleSheet(f"background:#fff; border-left:5px solid {border_color}; border-radius:6px; padding:6px 6px 6px 12px; margin-bottom:4px;")
-                rule_item_widget.name_label.setStyleSheet("font-weight:bold; font-size:13px; color:#222;")
-                rule_item_widget.status_label.setStyleSheet("color:#222; font-size:11px;")
-                # Tooltip for token issues
-                if token and 'tooltip' in issue_data:
-                    rule_item_widget.setToolTip(issue_data['tooltip'])
-                if node_name and node_name != 'N/A':
-                    goto_btn = QtWidgets.QPushButton("Go to Node")
-                    goto_btn.setStyleSheet(f"padding:1px 8px; border-radius:5px; background:{node_color}; color:white; font-weight:bold; font-size:10px;")
-                    goto_btn.clicked.connect(partial(self.goto_node, node_name))
-                    rule_item_widget.layout().addWidget(goto_btn)
-                # Auto-Fix button for token issues
-                if issue_data.get('auto_fix'):
-                    autofix_btn = QtWidgets.QPushButton("Auto-Fix")
-                    autofix_btn.setStyleSheet("padding:1px 8px; border-radius:5px; background:#388e3c; color:white; font-weight:bold; font-size:10px;")
-                    autofix_btn.clicked.connect(self.run_autofix)
-                    rule_item_widget.layout().addWidget(autofix_btn)
-                self.results_list_widget.addItem(list_item)
-                self.results_list_widget.setItemWidget(list_item, rule_item_widget)
-                list_item.setSizeHint(rule_item_widget.sizeHint())
+                    rule_name = f"{token} - {rule_type}"
+                else:
+                    rule_name = rule_type
+                
+                # Add to table with node name for "Go to Node" button
+                self.results_table.add_validation_result(
+                    rule_name,
+                    severity,
+                    details,
+                    node_name if node_name != 'N/A' else None
+                )
+                
             self.statusBar().showMessage(f"Validation complete: {len(issues)} issues found.", 5000)
         
     def goto_node(self, node_name):
@@ -245,6 +328,61 @@ class MainWindow(QtWidgets.QMainWindow):
         fixed = self.validator.fix_issues()
         self.run_validation()
         QtWidgets.QMessageBox.information(self, "Auto-Fix", f"Auto-fix applied to {fixed} issues.")
+
+    def _populate_yaml_selector(self):
+        """Populate the YAML selector dropdown with available YAML files"""
+        # List all .yaml files in the current directory
+        dir_path = os.path.dirname(os.path.abspath(__file__))
+        yamls = [f for f in os.listdir(dir_path) if f.endswith('.yaml')]
+        self.yaml_selector_combo.clear()
+        self.yaml_selector_combo.addItems(yamls)
+        
+        # Set current selection to match validator's current rules file
+        if hasattr(self.validator, 'rules_file_path') and self.validator.rules_file_path:
+            current_yaml = os.path.basename(self.validator.rules_file_path)
+            idx = self.yaml_selector_combo.findText(current_yaml)
+            if idx >= 0:
+                self.yaml_selector_combo.setCurrentIndex(idx)
+        elif yamls:
+            # Default to first YAML if no rules file set
+            self.yaml_selector_combo.setCurrentIndex(0)
+            self._on_yaml_selected(yamls[0])
+
+    def _on_yaml_selected(self, yaml_name):
+        """Handle when a YAML file is selected from the dropdown"""
+        if not yaml_name:
+            return
+            
+        # Update the validator's rules file path
+        dir_path = os.path.dirname(os.path.abspath(__file__))
+        new_yaml_path = os.path.join(dir_path, yaml_name)
+        
+        # Update validator
+        if hasattr(self.validator, 'set_rules_file_path'):
+            self.validator.set_rules_file_path(new_yaml_path)
+        else:
+            # Fallback: directly set the path and reload rules
+            self.validator.rules_file_path = new_yaml_path
+            self.validator.rules = self.validator._load_rules(new_yaml_path)
+        
+        # Update rules editor if it's open
+        if hasattr(self, 'rules_editor_widget'):
+            self.rules_editor_widget.rules_yaml_path = new_yaml_path
+            self.rules_editor_widget.load_rules_from_yaml()
+            
+        # Update status bar
+        self.statusBar().showMessage(f"Switched to rules file: {yaml_name}", 3000)
+
+    def refresh_yaml_selector(self):
+        """Refresh the YAML selector dropdown to include any newly created files"""
+        current_selection = self.yaml_selector_combo.currentText()
+        self._populate_yaml_selector()
+        
+        # Try to restore the previous selection if it still exists
+        if current_selection:
+            idx = self.yaml_selector_combo.findText(current_selection)
+            if idx >= 0:
+                self.yaml_selector_combo.setCurrentIndex(idx)
 
 _main_window_instance = None
 # This function will be called by your menu.py as "Validator.launch_validator_for_nuke()"

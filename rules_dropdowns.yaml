@@ -37,23 +37,24 @@ node_integrity:
 write_node_resolution:
   allowed_formats_options:
     Default:
-      - "HD_1080"
-      - "2K_Super_35_full-ap"
-      - "4K_Super_35_full-ap"
-      - "UHD_4K"
-      - "1K_Super_35_full-ap"
+      - "HD"
+      - "2K"
+      - "4K"
+      - "UHD"
+      - "1K"
     Sphere:
-      - "4000 4000 1.0 4K LL180"
-      - "6000 6000 1.0 6K LL180"
-      - "8000 8000 1.0 8K LL180"
-      - "10000 10000 1.0 10K LL180"
-      - "12000 12000 1.0 12K LL180"
+      - "4K"
+      - "6K"
+      - "8K"
+      - "10K"
+      - "12K"
 
 colorspaces: # For Read and Write nodes
   allowed_options:
     Nuke Default:
       - "default (sRGB)"
       - "default (scene_linear)"
+      - "default"
       - "sRGB"
       - "rec709"
       - "linear"
@@ -77,7 +78,7 @@ colorspaces: # For Read and Write nodes
       - "Utility - Log"
   channels: # For Write Nodes
     require_rgba_options: [true, false]
-    warn_on_rgb_only_options: [true, false]
+    warecon_rgb_only_options: [true, false]
     warn_on_extra_channels_options: [true, false]
     # UI could also list common channel selections like 'rgba', 'rgb', 'alpha', 'depth', etc.
     channel_selection_options: ["rgba", "rgb", "alpha", "all"]
@@ -94,8 +95,8 @@ render_settings: # For Write nodes
       - "none"
       - "Zip (1 scanline)"
       - "PIZ Wavelet (32 scanlines)"
-      - "DWAA (lossy)"
-      - "DWAB (lossy)"
+      - "DWAA"
+      - "DWAB"
   mov:
     codec_options: # Common QuickTime codecs in Nuke
       - "Apple ProRes 422 HQ"

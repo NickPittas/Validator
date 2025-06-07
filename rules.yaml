@@ -1,238 +1,246 @@
-# Nuke Validator Rules
-# This file defines the validation rules for your Nuke scripts
-
-# File Path and Naming Rules
 file_paths:
   version: 1.0
-  relative_path_required: true # true or false
-  severity_relative_path: "warning"
-  # Example for dynamic naming convention (regex will be built from this in future)
-  # naming_pattern_template: "<sequence><shotNumber>_<description>_<pixelMappingName><resolution>_<colorspace><gamma>_<fps>_<version>.<frame_padding>.<extension>"
-  # For now, a direct regex:
-  naming_pattern_regex: "^[A-Z]{4}\\d{4}_\\w+(_(LL180|LL360))?(_(1K|2K|4K|6K|8K|19K|12K))?_\\w+(_\\d{4})?_v\\d{3}\\.\\%0\\dd\\.(exr|png|jpg|mov|nk)$" # Example, needs refinement
-  # naming_tokens: # For future dynamic regex generation
-  #   sequence: { values: ["WTFB", "KITC", "IGB", "LIFF", "SOME", "OLNT", "ATBM"], regex_part: "([A-Z]{4})" }
-  #   shotNumber: { regex_part: "(\\d{4})" }
-  #   description: { values: ["concept", "layout", "comp", "previz", "roto", "dmp"], regex_part: "(\\w+)" }
-  #   pixelMappingName: { values: ["LL180", "LL360"], optional: true, regex_part: "(_(LL180|LL360))?" }
-  #   resolution: { values: ["1K", "2K", "4K", "6K", "8K", "19K", "12K"], optional: true, regex_part: "(_(1K|2K|4K|6K|8K|19K|12K))?" }
-  #   colorspaceGamma: { regex_part: "(\\w+)" } # Combined for simplicity in regex, could be split
-  #   fps: { values: ["2997", "5994"], optional: true, regex_part: "(_\\d{4})?" }
-  #   version: { regex_part: "(v\\d{3})" }
-  #   frame_padding: { regex_part: "(\\%0\\dd)" } # Placeholder, actual padding number varies
-  #   extension: { values: ["exr", "png", "jpg", "mov", "nk"], regex_part: "\\.(exr|png|jpg|mov|nk)" }
-  severity_naming_pattern: "warning"
-
-# Frame Range and Frame Rate (No changes requested, keeping existing structure if relevant)
-frame_range: # This was for root, keeping for now.
+  relative_path_required: false
+  severity_relative_path: warning
+  naming_pattern_regex: ^[A-Z]4_\d4_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_(?:LL180)_\d{1,2}k_(r709g24|sRGBg22|acescglin|ap0lin|ap1g22|p3g26|rec2020lin)_(2997)_v\d{2,3}_(?:%\d{2}d|#{4,8}|\d{4,8})_(jpg|jpeg|exr)_$
+  severity_naming_pattern: warning
+  filename_template: ^[A-Z]4_\d4_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_(?:LL180)_\d{1,2}k_(r709g24|sRGBg22|acescglin|ap0lin|ap1g22|p3g26|rec2020lin)_(2997)_v\d{2,3}_(?:%\d{2}d|#{4,8}|\d{4,8})_(jpg|jpeg|exr)_$
+  filename_tokens:
+  - name: sequence
+    value: 4
+    separator: _
+  - name: shotNumber
+    value: 4
+    separator: _
+  - name: description
+    value: null
+    separator: _
+  - name: pixelMappingName
+    value: LL180
+    separator: _
+  - name: resolution
+    value: null
+    separator: _
+  - name: colorspaceGamma
+    value:
+    - r709g24
+    - sRGBg22
+    - acescglin
+    - ap0lin
+    - ap1g22
+    - p3g26
+    - rec2020lin
+    separator: _
+  - name: fps
+    value: '2997'
+    separator: _
+  - name: version
+    value: null
+    separator: _
+  - name: frame_padding
+    value: null
+    separator: _
+  - name: extension
+    value:
+    - jpg
+    - jpeg
+    - exr
+    separator: _
+frame_range:
   version: 1.0
-  # min_frames: 10 # Example
-  # start_frame: 1001 # Example
-  # end_frame: 1100 # Example
-  severity: "warning"
-
-# Node Integrity
+  severity: warning
+  check_consistency: true
+  check_missing_frames: true
+  check_rate_consistency: true
+  default_fps: 24.0
 node_integrity:
   version: 1.0
   check_disabled_nodes: true
-  severity_disabled_nodes: "warning"
-  # check_unconnected_mandatory_inputs: true # Future addition
-  # severity_unconnected_inputs: "error" # Future addition
-
-# Resolution and Aspect Ratio (Now specific to Write Node output)
+  severity_disabled_nodes: warning
 write_node_resolution:
   version: 1.0
-  allowed_formats: ["HD_1080", "2K_Super_35_full-ap", "4K_Super_35_full-ap"] # Nuke format names
-  severity: "warning"
-
-# Color Space
-colorspaces: # For Read and Write nodes
+  allowed_formats:
+  - ''
+  severity: warning
+colorspaces:
   version: 1.0
   Read:
-    allowed: ["sRGB", "Rec.709", "ACEScg", "ACES - ACEScg", "Input - sRGB", "Input - Rec.709"] # Add more as needed from dropdown
-    severity: "warning"
+    allowed:
+    - ''
+    severity: warning
   Write:
-    allowed: ["sRGB", "Rec.709", "ACEScg", "ACES - ACEScg", "Output - sRGB", "Output - Rec.709"] # Add more as needed
-    severity: "warning"
-# color_space_consistency: # This was a separate check, can be kept or merged logic
-#   severity: "warning"
-
-# Channels and Layer Management (for Write Nodes)
+    allowed:
+    - ''
+    severity: warning
 channels:
   version: 1.0
   Write:
     require_rgba: true
     warn_on_rgb_only: true
-    warn_on_extra_channels: true # e.g. if 'all' is selected or custom layers beyond rgba
-    severity: "warning"
-
-# Render Settings (for Write nodes, file type specific)
+    warn_on_extra_channels: true
+    severity: warning
+  require_rgba: true
+  warn_on_rgb_only: false
+  warn_on_extra_channels: false
+  severity: error
 render_settings:
   version: 1.0
   Write:
     file_type_rules:
       exr:
-        datatype: ["16 bit half", "32 bit float"] # Knob: 'datatype'
-        compression: ["Zip (1 scanline)", "ZIP (1 scanline)", "PIZ Wavelet (32 scanlines)"] # Knob: 'compression' (values can vary)
-        # Example for specific EXR compression knob if it exists:
-        # exrCompression: ["zips", "zip", "piz"] # This is often part of the 'compression' knob value string
+        datatype:
+        - 16 bit half
+        compression:
+        - Zip (1 scanline)
       mov:
-        # Nuke's MOV writer knobs are 'codec' and then codec-specific ones
-        codec: ["avc1", "apch", "apcn", "apcs", "apco", "ap4h"] # Example H.264, ProRes variations
-        # For ProRes 4444, you'd check 'codec' for 'ap4h' (ProRes 4444) or 'ap4x' (ProRes 4444 XQ)
-        # This needs to be more dynamic or have very specific rules per codec.
-        # Example for a specific ProRes check (assuming 'codec' is 'ap4h'):
-        # prores_profile: ["ProRes 4444"] # This is not a direct knob, logic would be: if codec is ap4h, it's 4444.
+        codec:
+        - avc1
+        - apch
+        - apcn
+        - apcs
+        - apco
+        - ap4h
       jpg:
-        # JPG specific settings, e.g., quality
-        _jpeg_quality: [0.8, 0.9, 1.0] # Knob: '_jpeg_quality'
-    severity: "warning" # General severity for this category
-
-# Versioning (for Write nodes)
+        _jpeg_quality:
+        - 0.8
+        - 0.9
+        - 1.0
+    severity: warning
 versioning:
   version: 1.0
   require_version_token: true
-  version_token_regex: "_v(\\d+)" # Captures the version number
-  # match_nuke_script_version: true # Future: Compare with Nuke script's version
-  severity_require_token: "error"
-  # severity_match_script_version: "warning"
-
-# Bounding Boxes (Kept from original)
+  version_token_regex: _v(\d+)
+  severity_require_token: error
 bounding_boxes:
   version: 1.0
   Read:
-    severity: "warning"
+    severity: warning
   Write:
-    severity: "warning"
-
-# Node Dependencies (Kept from original, review if still needed with other changes)
+    severity: warning
 node_dependencies:
   version: 1.0
-  Tracker: # Example
-    required: ["Read"]
-    severity: "error"
-#  Write: # Example
-#    required: ["Reformat"] # A more useful rule than Tracker
-#    severity: "warning"
-
-# Node Names (Kept from original)
+  Tracker:
+    required:
+    - Read
+    severity: error
 node_names:
   version: 1.0
-  pattern: "^[A-Za-z0-9_]+$" # Allow uppercase
-  severity: "warning"
-
-# Node Parameters (Generic, can be used for various checks)
+  pattern: ^[A-Za-z0-9_]+$
+  severity: warning
 node_parameters:
   version: 1.0
-  Read:
-    # Example: ensure 'premultiplied' is checked for certain file types if needed
-    # premultiplied: { allowed_values: [true], severity: "warning", if_file_type: ["png_with_alpha"] }
-    pass # Add specific parameter checks here if needed beyond other categories
-  Write:
-    pass
-
-# Node Connections (Kept from original)
+  Read: pass
+  Write: pass
 node_connections:
   version: 1.0
-  Merge2: # Nuke default Merge node is Merge2
-    inputs: # Naming of inputs can be 'A', 'B' or by index if preferred
-      A: { allowed_nodes: ["Read", "Grade", "Roto", "Transform", "Merge2"], severity: "warning" }
-      B: { allowed_nodes: ["Read", "Grade", "Roto", "Transform", "Merge2"], severity: "warning" }
-
-# Viewport or Viewer Nodes
+  Merge2:
+    inputs:
+      A:
+        allowed_nodes:
+        - Read
+        - Grade
+        - Roto
+        - Transform
+        - Merge2
+        severity: warning
+      B:
+        allowed_nodes:
+        - Read
+        - Grade
+        - Roto
+        - Transform
+        - Merge2
+        severity: warning
 viewer_nodes:
   version: 1.0
-  warn_if_ip_active: true # Checks 'ip' (use GPU for viewer process) knob
-  severity: "info" # Usually an info or warning, not an error
-
-# Expressions and Script Errors
+  warn_if_ip_active: true
+  severity: info
 expressions_errors:
   version: 1.0
-  check_for_errors: true # Enables checking knob.hasError()
-  severity: "error" # Expression errors are usually critical
+  check_for_errors: true
+  severity: error
 read_file_errors:
   version: 1.0
-  check_existence: true # Enables checking if Read node files exist (first frame)
-  severity: "error" # Missing files are critical
-
-# REMOVED SECTIONS:
-# plugin_compatibility
-# performance
-# node_metadata
-# node_expressions (Replaced by expressions_errors)
-
+  check_existence: true
+  severity: error
 path_structures:
   version: 1.0
-  comp_path: "04_comp/<shot_name>/render/<resolution>/<version>"
-  nuke_render_path: "Renders/Nuke/<shot_name>/<resolution>/<version>"
-
-# --- Token Definitions for Advanced Logic ---
+  comp_path: 04_comp/<shot_name>/render/<resolution>/<version>
+  nuke_render_path: Renders/Nuke/<shot_name>/<resolution>/<version>
 token_definitions:
   sequence:
-    regex: "[A-Z]{4}"
-    description: "Project code, 4 uppercase letters."
-    example: "WTFB"
-    tooltip: "4-letter project code (e.g. WTFB, KITC)"
+    regex: '[A-Z]{4}'
+    description: Project code, 4 uppercase letters.
+    example: WTFB
+    tooltip: 4-letter project code (e.g. WTFB, KITC)
     auto_fix: false
   shotNumber:
-    regex: "\\d{4}"
-    description: "Shot number, 4 digits."
-    example: "0101"
-    tooltip: "4-digit shot number (e.g. 0101, 1002)"
+    regex: \d{4}
+    description: Shot number, 4 digits.
+    example: '0101'
+    tooltip: 4-digit shot number (e.g. 0101, 1002)
     auto_fix: true
     pad_to: 4
   description:
-    regex: "[a-zA-Z0-9_]+"
-    description: "Short description, alphanumeric and underscores."
-    example: "comp"
-    tooltip: "Short description (e.g. comp, layout)"
+    regex: '[a-zA-Z0-9_]+'
+    description: Short description, alphanumeric and underscores.
+    example: comp
+    tooltip: Short description (e.g. comp, layout)
     auto_fix: false
   pixelMappingName:
-    regex: "LL180|LL360"
-    description: "Pixel mapping name, optional."
-    example: "LL180"
-    tooltip: "Pixel mapping (LL180, LL360)"
+    regex: LL180|LL360
+    description: Pixel mapping name, optional.
+    example: LL180
+    tooltip: Pixel mapping (LL180, LL360)
     auto_fix: false
   resolution:
-    regex: "1K|2K|4K|6K|8K|19K|12K"
-    description: "Resolution, optional."
-    example: "2K"
-    tooltip: "Resolution (e.g. 2K, 4K)"
+    regex: 1K|2K|4K|6K|8K|19K|12K
+    description: Resolution, optional.
+    example: 2K
+    tooltip: Resolution (e.g. 2K, 4K)
     auto_fix: false
   colorspace:
-    regex: "[a-zA-Z0-9_\-]+"
-    description: "Colorspace."
-    example: "sRGB"
-    tooltip: "Colorspace (e.g. sRGB, ACEScg)"
+    regex: '[a-zA-Z0-9_-]+'
+    description: Colorspace.
+    example: sRGB
+    tooltip: Colorspace (e.g. sRGB, ACEScg)
     auto_fix: false
   gamma:
-    regex: "[a-zA-Z0-9_\-]+"
-    description: "Gamma."
-    example: "2.2"
-    tooltip: "Gamma (e.g. 2.2, Linear)"
+    regex: '[a-zA-Z0-9_-]+'
+    description: Gamma.
+    example: '2.2'
+    tooltip: Gamma (e.g. 2.2, Linear)
     auto_fix: false
   fps:
-    regex: "2997|5994"
-    description: "Frames per second, optional."
-    example: "2997"
-    tooltip: "FPS (e.g. 2997, 5994)"
+    regex: 2997|5994
+    description: Frames per second, optional.
+    example: '2997'
+    tooltip: FPS (e.g. 2997, 5994)
     auto_fix: false
   version:
-    regex: "v\\d{3}"
-    description: "Version, v followed by 3 digits."
-    example: "v001"
-    tooltip: "Version (e.g. v001, v002)"
+    regex: v\d{3}
+    description: Version, v followed by 3 digits.
+    example: v001
+    tooltip: Version (e.g. v001, v002)
     auto_fix: true
     pad_to: 3
   frame_padding:
-    regex: "%0\\dd"
-    description: "Frame padding, e.g. %04d."
-    example: "%04d"
-    tooltip: "Frame padding (e.g. %04d)"
+    regex: '%0\dd'
+    description: Frame padding, e.g. %04d.
+    example: '%04d'
+    tooltip: Frame padding (e.g. %04d)
     auto_fix: false
   extension:
-    regex: "exr|png|jpg|mov|nk"
-    description: "File extension."
-    example: "exr"
-    tooltip: "File extension (exr, png, jpg, mov, nk)"
+    regex: exr|png|jpg|mov|nk
+    description: File extension.
+    example: exr
+    tooltip: File extension (exr, png, jpg, mov, nk)
     auto_fix: false
+path_rules:
+  base_path: ''
+  shot_structure: 'comp_path: 04_comp/<shot_name>/render/<resolution>/<version>'
+  relative_path: 04_comp/SHOT_0101/render/1K/v001
+  tokens:
+    <shot_name>: SHOT_0101
+    <resolution>: 1K
+    <version>: v001
