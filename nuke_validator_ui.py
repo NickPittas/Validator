@@ -63,12 +63,12 @@ DEFAULT_NAMING_TOKENS: Dict[str, Dict[str, Any]] = {
     },
     "resolution": {
         "regex": "\\d{1,2}[kK]",
-        "description": "Resolution abbreviation (e.g., 1k, 4k, 19k).",
+        "description": "Resolution abbreviation (e.g., 2k, 4k, 12k).",
         "examples": ["1k", "2k", "4k", "8k", "12k", "16k", "19k", "32k"],
         "separator": "_"
     },
     "colorspaceGamma": {
-        "regex": "(r709|sRGB|ap0|ap1|p3|rec2020)(lin|log|g22|g24|g26)",
+        "regex": "(r709g22|sRGBg24|srgbg24|ap0log|ap1lin|p3g26|acescglin)",
         "description": "Colorspace and gamma (e.g., sRGBg22, ap0lin).",
         "examples": ["sRGBg22", "r709g24", "ap0lin", "ap1g22"],
         "separator": "_"

@@ -1,1 +1,0 @@
-TEST DEBUG: filename='ABCD1234_comp_LL18010k_r709lin_24_v001.%04d.exr'

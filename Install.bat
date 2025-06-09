@@ -1,0 +1,1 @@
+"C:\Program Files\Nuke16.0v2\python.exe" -m pip install -i requirements

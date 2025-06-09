@@ -1,7 +1,7 @@
 file_paths:
   relative_path_required: false
   severity_relative_path: warning
-  filename_template: ^[A-Za-z]{3,4}\d{4}_.+?_(?:(LL180|LL360))?\d{1,2}[kK]_(r709g24|sRGBg22|acescglin)_(2997|5994|24|25|30|50|60)_v\d{2,3}\.(?:%0[4-8]d|#{4,8})\.(exr)$
+  filename_template: ^[A-Za-z]{3,4}\d{4}_.+?_(?:(LL180|LL360))?\d{1,2}[kK]_(r709g24|sRGBg22|acescglin)_(2997|5994|24|25|30|50|60)_v\d{2,3}\.(?:%0[4-8]d|#{4,8})\.(jpg|jpeg|exr)$
   filename_tokens:
   - name: sequence
     token_def:
@@ -131,18 +131,20 @@ file_paths:
       - dpx
       desc: File extension (multi-select)
     value:
+    - jpg
+    - jpeg
     - exr
     separator: ''
-  naming_pattern_regex: ^[A-Za-z]{3,4}\d{4}_.+?_(?:(LL180|LL360))?\d{1,2}[kK]_(r709g24|sRGBg22|acescglin)_(2997|5994|24|25|30|50|60)_v\d{2,3}\.(?:%0[4-8]d|#{4,8})\.(exr)$
+  naming_pattern_regex: ^[A-Za-z]{3,4}\d{4}_.+?_(?:(LL180|LL360))?\d{1,2}[kK]_(r709g24|sRGBg22|acescglin)_(2997|5994|24|25|30|50|60)_v\d{2,3}\.(?:%0[4-8]d|#{4,8})\.(jpg|jpeg|exr)$
   severity_naming_pattern: warning
 path_rules:
   base_path: V:\KennyChesney_TheSphere_2025-02-06
   shot_structure: 'comp_path: 04_comp/<shot_name>/render/<resolution>/<version>'
-  relative_path: 04_comp/KITC1000/render/12K/v113
+  relative_path: 04_comp/LIFF0010/render/12K/v037
   tokens:
-    <shot_name>: KITC1000
+    <shot_name>: LIFF0010
     <resolution>: 12K
-    <version>: v113
+    <version>: v037
 frame_range:
   check_consistency: true
   check_missing_frames: true
@@ -158,7 +160,7 @@ write_node_resolution:
   - 12K
 colorspaces:
   Read:
-    severity: warning
+    severity: info
     allowed:
     - default (sRGB)
     - default (scene_linear)
@@ -175,7 +177,7 @@ colorspaces:
     - Output - sRGB
     - Output - Rec.709
   Write:
-    severity: warning
+    severity: info
     allowed:
     - default (ACES - ACEScg)
     - scene_linear (ACES - ACEScg)
@@ -183,6 +185,7 @@ colorspaces:
     - rendering (ACES - ACEScg)
     - Output - sRGB
     - Output - Rec.709
+    - Output - sRGB
 channels:
   require_rgba: false
   warn_on_rgb_only: false

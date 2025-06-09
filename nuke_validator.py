@@ -397,6 +397,15 @@ class NukeValidator:
                 print(f"[DEBUG] Completed detailed validation with {len(detailed_errors)} errors")
                 if detailed_errors:
                     print(f"[DEBUG] Errors found: {detailed_errors}")
+                    
+                    # If we have multiple errors, try to identify the most important one
+                    # rather than returning all of them
+                    if len(detailed_errors) > 1:
+                        # Prioritize version errors
+                        version_error = next((err for err in detailed_errors if "version" in err.lower()), None)
+                        if version_error:
+                            print(f"[DEBUG] Prioritizing version error: '{version_error}'")
+                            detailed_errors = [version_error]
                 else:
                     print(f"[DEBUG] No errors found - filename is valid")
                 
@@ -510,18 +519,36 @@ class NukeValidator:
                     print(f"[DEBUG] ===== BASIC VALIDATION END =====")
                     return []  # No errors, validation passed
             else:
-                # Step 2: Full regex match failed, perform token-by-token validation
+                # Step 2: Full regex match failed, but we should NOT do token-by-token validation
                 print(f"[DEBUG] Full regex match failed")
-                # Only proceed with detailed validation if we have token definitions
+                
+                # Instead, analyze the full filename error to identify which token is likely failing
                 if filename_tokens:
-                    # Use token-by-token validation for detailed error messages
-                    token_errors = self._validate_by_tokens(filename, filename_tokens)
-                    if token_errors:
-                        print(f"[DEBUG] Token validation returned {len(token_errors)} specific errors")
-                        errors.extend(token_errors)
+                    # Find the most likely failing token based on the full filename pattern
+                    failing_token = self._identify_failing_token(filename, pattern_str, filename_tokens)
+                    if failing_token:
+                        print(f"[DEBUG] Identified failing token: '{failing_token['name']}'")
+                        token_name = failing_token.get('label', failing_token['name'])
+                        
+                        # Create a more descriptive error message based on token type
+                        token_type = failing_token.get('type', 'static')
+                        if token_type == 'range':
+                            min_val = failing_token.get('min_value', failing_token.get('min', 2))
+                            max_val = failing_token.get('max_value', failing_token.get('max', 4))
+                            errors.append(f"Invalid '{token_name}': Expected {min_val}-{max_val} letters")
+                        elif token_type == 'numeric':
+                            digits = failing_token.get('digits', 4)
+                            errors.append(f"Invalid '{token_name}': Expected {digits} digits")
+                        elif token_name.lower() == 'version':
+                            errors.append(f"Missing '{token_name}': Expected version token not found in filename")
+                        else:
+                            # Include any description if available
+                            description = failing_token.get('description', 'Format doesn\'t match expected pattern')
+                            errors.append(f"Invalid '{token_name}': {description}")
                     else:
-                        print(f"[DEBUG] Token validation returned no specific errors")
-                    # No need for additional checks if token validation gave us details
+                        # If we can't identify a specific token, add a generic error
+                        errors.append(f"Filename '{filename}' doesn't match the expected pattern")
+                    
                     return errors
                 # If we don't have token definitions, fall back to general checks
                 # Check for common separator issues
@@ -692,7 +719,16 @@ class NukeValidator:
                                 print(f"[DEBUG] Extracted token name from missing error: '{token_name}'")
                             
                             # Create a more descriptive primary error message
-                            primary_message = f"Filename format error: {primary_error}"
+                            # Extract the most important part of the error message
+                            if "Invalid '" in primary_error and "': " in primary_error:
+                                # Extract just the specific error part after the colon
+                                error_parts = primary_error.split("': ", 1)
+                                if len(error_parts) > 1:
+                                    primary_message = f"Filename format error: {error_parts[1]}"
+                                else:
+                                    primary_message = f"Filename format error: {primary_error}"
+                            else:
+                                primary_message = f"Filename format error: {primary_error}"
                             
                             # Log the detailed errors for debugging
                             print(f"[DEBUG] Detailed validation errors: {detailed_errors}")
@@ -792,33 +828,14 @@ class NukeValidator:
                 # If this is the only error we find, return it immediately to avoid false positives
                 # Otherwise continue with normal validation to find other issues
                 
-        # Check if the filename matches the basic structure of sequence + shot number
-        # This helps avoid false errors on these tokens when the issue is elsewhere
-        # Only do this check if we have both sequence and shotNumber tokens with regex patterns
-        sequence_token = next((t for t in token_definitions[:2] if t.get("name") == "sequence" and "regex" in t), None)
-        shotNumber_token = next((t for t in token_definitions[:2] if t.get("name") == "shotNumber" and "regex" in t), None)
+        # We no longer need a separate check for combined sequence+shotNumber patterns
+        # The full filename validation should already handle this correctly
+        # If the full validation fails, we'll identify which specific token is failing
         
-        if sequence_token and shotNumber_token:
-            # Use the regex patterns from the YAML configuration
-            basic_pattern = sequence_token["regex"] + shotNumber_token["regex"]
-            
-            try:
-                basic_match = re.match(f"^{basic_pattern}", filename)
-                if basic_match:
-                    print(f"[DEBUG] Basic sequence+shot pattern matches: '{basic_match.group(0)}'")
-                    # Mark both tokens as part of a combined pattern to avoid individual error reporting
-                    sequence_token["_combined_match"] = True
-                    shotNumber_token["_combined_match"] = True
-                    
-                    # If the basic pattern matches but we already found a version error,
-                    # just return the version error to avoid confusing the user
-                    if errors and "version" in errors[0].lower():
-                        print(f"[DEBUG] Returning only version error to avoid confusion")
-                        return errors
-            except re.error as e:
-                # If there's an error with the regex pattern, log it but continue
-                print(f"[DEBUG] Error in combined pattern regex: {str(e)}")
+        # Note: We've removed the redundant combined token check that was here
+        # The full regex pattern from the YAML configuration should already account for all valid formats
         
+        # If we didn't match a combined pattern, proceed with normal token-by-token validation
         for i, token_def in enumerate(token_definitions):
             # Get the token configuration
             token_name = token_def.get("name")
@@ -888,20 +905,24 @@ class NukeValidator:
                         
                         if combined_match:
                             print(f"[DEBUG] Combined pattern matched: '{combined_match.group(0)}'")
-                            # Extract just the sequence part based on its pattern
-                            seq_only_pattern = f"^{token_pattern}"
-                            seq_match = re.match(seq_only_pattern, remaining_filename)
-                            if seq_match:
-                                matched_part = seq_match.group(0)
-                                print(f"[DEBUG] Successfully matched sequence: '{matched_part}'")
-                                remaining_filename = remaining_filename[len(matched_part):]
-                                print(f"[DEBUG] Remaining filename: '{remaining_filename}'")
-                                
-                                # Set a flag to skip validation errors for the shotNumber token
-                                # since we've already validated it as part of the combined pattern
-                                token_definitions[1]["_combined_match"] = True
-                                
-                                continue  # Skip to next token (shotNumber)
+                            
+                            # Mark both tokens as part of a combined pattern
+                            sequence_token = token_definitions[0]
+                            shotNumber_token = token_definitions[1]
+                            sequence_token["_combined_match"] = True
+                            shotNumber_token["_combined_match"] = True
+                            
+                            # Update the remaining filename after matching the combined pattern
+                            matched_part = combined_match.group(0)
+                            remaining_filename = remaining_filename[len(matched_part):]
+                            print(f"[DEBUG] After combined match, remaining filename: '{remaining_filename}'")
+                            
+                            # Remove separator if present
+                            if separator and remaining_filename.startswith(separator):
+                                remaining_filename = remaining_filename[len(separator):]
+                                print(f"[DEBUG] After removing separator, remaining filename: '{remaining_filename}'")
+                            
+                            continue  # Skip to next token (shotNumber)
                 
                 # Add separator to the pattern if available and not the last token
                 if separator and i < len(token_definitions) - 1:
@@ -963,7 +984,7 @@ class NukeValidator:
                             # Special handling for static tokens, especially version
                             if token_name == "version":
                                 # For version token, provide a more specific error message without examples
-                                error_msg = f"Missing '{display_name}': Expected version token but found '{actual_content}'"
+                                error_msg = f"Missing '{display_name}': Expected version token not found in filename"
                             elif "value" in token_def and token_def["value"] is not None:
                                 expected_value = token_def["value"]
                                 error_msg = f"Invalid '{display_name}': Expected '{expected_value}' but found '{actual_content}'"
@@ -1070,6 +1091,161 @@ class NukeValidator:
             
         # This function ONLY returns error strings and does NOT create validation issues
         return errors
+        
+    def _identify_failing_token(self, filename, pattern_str, token_definitions):
+        """
+        Identify which token is likely failing in the filename based on the full pattern.
+        This is used when the full regex match fails, to avoid token-by-token validation.
+        
+        Args:
+            filename (str): The filename to analyze
+            pattern_str (str): The full regex pattern that failed to match
+            token_definitions (list): List of token definitions from YAML
+            
+        Returns:
+            dict: The token definition that is most likely failing, or None if can't determine
+        """
+        print(f"[DEBUG] ===== IDENTIFYING FAILING TOKEN =====")
+        print(f"[DEBUG] Analyzing filename: '{filename}'")
+        
+        # Let's try a more sophisticated approach to identify which part of the regex is failing
+        
+        # Check if we can deduce the failing token from the pattern and filename
+        if pattern_str:
+            print(f"[DEBUG] Analyzing pattern: '{pattern_str}'")
+            
+            # Try to match the pattern against the filename
+            try:
+                re.match(pattern_str, filename)
+            except re.error as e:
+                print(f"[DEBUG] Regex error in pattern: {str(e)}")
+                # If there's a regex error, it might indicate which part is problematic
+                failing_token = next((t for t in token_definitions if t.get("regex", "") in str(e)), None)
+                if failing_token:
+                    return failing_token
+        
+        # Check for version token - this is often the most critical
+        version_token = next((t for t in token_definitions if t.get("name") == "version" and "regex" in t), None)
+        if version_token:
+            version_pattern = version_token["regex"]
+            version_match = re.search(version_pattern, filename)
+            if not version_match:
+                print(f"[DEBUG] Version token not found in filename - this is likely the issue")
+                return version_token
+        
+        # Try an incremental matching approach to identify the failing token
+        # Start with just the first token, then add tokens one by one
+        # The first point where the match fails indicates which token is causing the issue
+        
+        partial_pattern = ""
+        last_successful_token = None
+        
+        for i, token in enumerate(token_definitions):
+            token_name = token.get("name")
+            token_pattern = token.get("regex", "")
+            
+            # Skip tokens without regex patterns
+            if not token_pattern:
+                continue
+                
+            # Add this token's pattern to our partial pattern
+            if i > 0 and "_" in pattern_str:  # Add separator if needed
+                partial_pattern += "_?"  # Make separator optional for flexibility
+            
+            partial_pattern += f"({token_pattern})"
+            
+            print(f"[DEBUG] Testing partial pattern: '{partial_pattern}' against '{filename}'")
+            
+            try:
+                partial_match = re.match(f"^{partial_pattern}", filename)
+                if partial_match:
+                    print(f"[DEBUG] Partial match succeeded up to token: '{token_name}'")
+                    last_successful_token = token
+                else:
+                    print(f"[DEBUG] Partial match failed at token: '{token_name}'")
+                    # This is likely the failing token
+                    return token
+            except re.error:
+                print(f"[DEBUG] Regex error in partial pattern with token: '{token_name}'")
+                # This token might have regex issues
+                return token
+        
+        # If we get here and all partial patterns matched, the issue might be at the end
+        # Check if there's anything left in the filename that wasn't matched
+        if last_successful_token:
+            try:
+                last_match = re.match(f"^{partial_pattern}", filename)
+                if last_match and last_match.end() < len(filename):
+                    remaining = filename[last_match.end():]
+                    print(f"[DEBUG] Unmatched content at end: '{remaining}'")
+                    # The issue might be with the last token or something missing
+                    return token_definitions[-1]
+            except re.error:
+                pass
+        
+        # If the incremental approach didn't identify a failing token,
+        # fall back to checking each token individually against parts of the filename
+        
+        # First, check for version token as it's often the most critical
+        version_token = next((t for t in token_definitions if t.get("name") == "version" and "regex" in t), None)
+        if version_token:
+            version_pattern = version_token.get("regex")
+            version_match = re.search(version_pattern, filename)
+            if not version_match:
+                print(f"[DEBUG] Version token not found in filename - this is likely the issue")
+                return version_token
+        
+        # If we still haven't identified the failing token, try one more approach:
+        # Split the filename by common separators and check each part
+        parts = re.split(r'[_\.]', filename)
+        for token in token_definitions:
+            token_pattern = token.get("regex", "")
+            if not token_pattern:
+                continue
+                
+            # Check if any part of the filename matches this token's pattern
+            matched = False
+            for part in parts:
+                try:
+                    if re.match(f"^{token_pattern}$", part):
+                        matched = True
+                        break
+                except re.error:
+                    continue
+                    
+            if not matched:
+                print(f"[DEBUG] No part of filename matches token '{token.get('name')}'")
+                return token
+        
+        # If we still haven't identified a failing token, make an educated guess
+        # based on common filename issues
+        
+        # Check for common issues:
+        # 1. Missing extension
+        if '.' not in filename:
+            print(f"[DEBUG] Filename has no extension")
+            # Look for an extension token
+            ext_token = next((t for t in token_definitions if t.get("name", "").lower() == "extension"), None)
+            if ext_token:
+                return ext_token
+        
+        # 2. Wrong number of parts (separated by underscores)
+        expected_parts = len([t for t in token_definitions if t.get("required", True)])
+        actual_parts = len(filename.split('_'))
+        if expected_parts != actual_parts:
+            print(f"[DEBUG] Expected {expected_parts} parts, found {actual_parts}")
+            # Return the token at the position where things went wrong
+            if actual_parts < expected_parts and actual_parts < len(token_definitions):
+                return token_definitions[actual_parts]
+        
+        # If we can't determine which token is failing, return the first required token as a best guess
+        first_required = next((t for t in token_definitions if t.get("required", True)), None)
+        if first_required:
+            return first_required
+            
+        # Last resort: return None
+        print(f"[DEBUG] Could not identify specific failing token")
+        return None
     def _check_bounding_boxes(self, nodes: List[nuke.Node]):
         """
         Check bounding boxes for Read and Write nodes
