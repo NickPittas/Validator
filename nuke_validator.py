@@ -674,17 +674,22 @@ class NukeValidator:
                             
                             # Extract token name from error message if possible
                             token_name = "unknown"
-                            for error in detailed_errors:
-                                if "Invalid '" in error and "': " in error:
-                                    # Extract the token name from error messages like "Invalid 'TokenName': ..."
-                                    # This correctly identifies which token has the validation error
-                                    token_name = error.split("Invalid '")[1].split("': ")[0]
-                                    print(f"[DEBUG] Extracted token name from error: '{token_name}'")
-                                    break
                             
-                            # Ensure we have a clear primary message that indicates this is a filename issue
-                            # We don't need to add the redundant placeholder message anymore
-                            # The base message in the details string will serve this purpose
+                            # First check for version errors as they're most important
+                            version_error = next((error for error in detailed_errors if "version" in error.lower()), None)
+                            if version_error:
+                                token_name = "version"
+                                primary_error = version_error
+                                print(f"[DEBUG] Found version error, prioritizing: '{version_error}'")
+                            # Otherwise extract token name from the first error
+                            elif "Invalid '" in primary_error and "': " in primary_error:
+                                # Extract the token name from error messages like "Invalid 'TokenName': ..."
+                                token_name = primary_error.split("Invalid '")[1].split("': ")[0]
+                                print(f"[DEBUG] Extracted token name from error: '{token_name}'")
+                            # Also check for "Missing" errors
+                            elif "Missing '" in primary_error and "': " in primary_error:
+                                token_name = primary_error.split("Missing '")[1].split("': ")[0]
+                                print(f"[DEBUG] Extracted token name from missing error: '{token_name}'")
                             
                             # Create a more descriptive primary error message
                             primary_message = f"Filename format error: {primary_error}"
@@ -773,6 +778,47 @@ class NukeValidator:
         # Keep track of separators between tokens
         separator = ""
         
+        # First, check if the version token is missing by looking for it in the filename
+        # This is a special check because version is critical and often the source of errors
+        version_token_def = next((t for t in token_definitions if t.get("name") == "version"), None)
+        if version_token_def and "regex" in version_token_def:
+            version_pattern = version_token_def.get("regex")
+            version_match = re.search(version_pattern, filename)
+            if not version_match:
+                display_name = version_token_def.get("label", "version")
+                error_msg = f"Missing '{display_name}': Expected version token not found in filename"
+                print(f"[DEBUG] {error_msg}")
+                errors.append(error_msg)
+                # If this is the only error we find, return it immediately to avoid false positives
+                # Otherwise continue with normal validation to find other issues
+                
+        # Check if the filename matches the basic structure of sequence + shot number
+        # This helps avoid false errors on these tokens when the issue is elsewhere
+        # Only do this check if we have both sequence and shotNumber tokens with regex patterns
+        sequence_token = next((t for t in token_definitions[:2] if t.get("name") == "sequence" and "regex" in t), None)
+        shotNumber_token = next((t for t in token_definitions[:2] if t.get("name") == "shotNumber" and "regex" in t), None)
+        
+        if sequence_token and shotNumber_token:
+            # Use the regex patterns from the YAML configuration
+            basic_pattern = sequence_token["regex"] + shotNumber_token["regex"]
+            
+            try:
+                basic_match = re.match(f"^{basic_pattern}", filename)
+                if basic_match:
+                    print(f"[DEBUG] Basic sequence+shot pattern matches: '{basic_match.group(0)}'")
+                    # Mark both tokens as part of a combined pattern to avoid individual error reporting
+                    sequence_token["_combined_match"] = True
+                    shotNumber_token["_combined_match"] = True
+                    
+                    # If the basic pattern matches but we already found a version error,
+                    # just return the version error to avoid confusing the user
+                    if errors and "version" in errors[0].lower():
+                        print(f"[DEBUG] Returning only version error to avoid confusion")
+                        return errors
+            except re.error as e:
+                # If there's an error with the regex pattern, log it but continue
+                print(f"[DEBUG] Error in combined pattern regex: {str(e)}")
+        
         for i, token_def in enumerate(token_definitions):
             # Get the token configuration
             token_name = token_def.get("name")
@@ -785,10 +831,10 @@ class NukeValidator:
             print(f"[DEBUG] Initial pattern: '{token_pattern}'")
             
             # If there's a custom separator, use it
+            prev_separator = separator
             if "separator" in token_def:
                 separator = token_def["separator"]
                 print(f"[DEBUG] Using separator: '{separator}'")
-
             
             # Special handling for different token types
             if token_type == "static":
@@ -822,6 +868,41 @@ class NukeValidator:
                 # Build the part of the pattern to match against the remaining filename
                 pattern_to_match = token_pattern
                 
+                # Special handling for sequence and shotNumber tokens
+                if i == 0 and token_name == "sequence" and len(token_definitions) > 1:
+                    # Check if the next token is shotNumber
+                    next_token = token_definitions[1]
+                    if next_token.get("name") == "shotNumber":
+                        # For sequence token, we need to handle the case where there might not be a separator
+                        # between sequence and shotNumber (e.g., "KITC1000" instead of "KITC_1000")
+                        next_pattern = next_token.get("regex", "")
+                        if next_token.get("type") == "numeric":
+                            digits = next_token.get("digits", 4)
+                            if not re.search(r'\\d\{\d+\}', next_pattern):
+                                next_pattern = f"\\d{{{digits}}}"
+                        
+                        # Try to match the combined pattern without separator
+                        combined_pattern = f"^{token_pattern}{next_pattern}"
+                        print(f"[DEBUG] Trying combined pattern: '{combined_pattern}'")
+                        combined_match = re.match(combined_pattern, remaining_filename)
+                        
+                        if combined_match:
+                            print(f"[DEBUG] Combined pattern matched: '{combined_match.group(0)}'")
+                            # Extract just the sequence part based on its pattern
+                            seq_only_pattern = f"^{token_pattern}"
+                            seq_match = re.match(seq_only_pattern, remaining_filename)
+                            if seq_match:
+                                matched_part = seq_match.group(0)
+                                print(f"[DEBUG] Successfully matched sequence: '{matched_part}'")
+                                remaining_filename = remaining_filename[len(matched_part):]
+                                print(f"[DEBUG] Remaining filename: '{remaining_filename}'")
+                                
+                                # Set a flag to skip validation errors for the shotNumber token
+                                # since we've already validated it as part of the combined pattern
+                                token_definitions[1]["_combined_match"] = True
+                                
+                                continue  # Skip to next token (shotNumber)
+                
                 # Add separator to the pattern if available and not the last token
                 if separator and i < len(token_definitions) - 1:
                     pattern_to_match += re.escape(separator)
@@ -845,6 +926,11 @@ class NukeValidator:
                 if not match:
                     # If the token is required, report an error
                     if token_required:
+                        # Skip error reporting if this token was already validated as part of a combined pattern
+                        if token_def.get("_combined_match", False):
+                            print(f"[DEBUG] Skipping error for token '{token_name}' as it was part of a combined pattern")
+                            continue
+                            
                         # If there's no match and the token is required, add a specific error
                         display_name = token_def.get("label", token_name)
                         print(f"[DEBUG] No match for required token '{display_name}'")
@@ -869,16 +955,26 @@ class NukeValidator:
                             print(f"[DEBUG] Adding error: {error_msg}")
                             errors.append(error_msg)
                         elif token_type == "numeric":
+                            # For numeric tokens, just state the expected number of digits without examples
                             error_msg = f"Invalid '{display_name}': Expected {digits} digits but found '{actual_content}'"
+                            print(f"[DEBUG] Adding error: {error_msg}")
+                            errors.append(error_msg)
+                        elif token_type == "static":
+                            # Special handling for static tokens, especially version
+                            if token_name == "version":
+                                # For version token, provide a more specific error message without examples
+                                error_msg = f"Missing '{display_name}': Expected version token but found '{actual_content}'"
+                            elif "value" in token_def and token_def["value"] is not None:
+                                expected_value = token_def["value"]
+                                error_msg = f"Invalid '{display_name}': Expected '{expected_value}' but found '{actual_content}'"
+                            elif "description" in token_def:
+                                error_msg = f"Invalid '{display_name}': Expected {token_def['description']} but found '{actual_content}'"
+                            else:
+                                error_msg = f"Invalid '{display_name}' format: Found '{actual_content}'"
                             print(f"[DEBUG] Adding error: {error_msg}")
                             errors.append(error_msg)
                         elif token_type == "enum":
                             error_msg = f"Invalid '{display_name}': Expected one of [{', '.join(options)}] but found '{actual_content}'"
-                            print(f"[DEBUG] Adding error: {error_msg}")
-                            errors.append(error_msg)
-                        elif token_type == "static" and "value" in token_def:
-                            expected_value = token_def.get("value", "")
-                            error_msg = f"Invalid '{display_name}': Expected '{expected_value}' but found '{actual_content}'"
                             print(f"[DEBUG] Adding error: {error_msg}")
                             errors.append(error_msg)
                         else:
@@ -962,6 +1058,15 @@ class NukeValidator:
                 f.write("No errors - filename is valid\n\n")
                 
         print(f"[DEBUG] ===== TOKEN VALIDATION END =====")
+        
+        # If we have multiple errors, prioritize version errors as they're often the root cause
+        if errors:
+            version_errors = [err for err in errors if "version" in err.lower()]
+            if version_errors:
+                # Move version errors to the front of the list
+                for ver_err in version_errors:
+                    errors.remove(ver_err)
+                    errors.insert(0, ver_err)
             
         # This function ONLY returns error strings and does NOT create validation issues
         return errors
