@@ -61,6 +61,10 @@ colorspaces: # For Read and Write nodes
     ACES:
       - "ACES - ACES2065-1"
       - "ACES - ACEScg"
+      - "default (ACES - ACEScg)"
+      - "scene_linear (ACES - ACEScg)"
+      - "compositing_linear (ACES - ACEScg)"
+      - "rendering (ACES - ACEScg)"
     Input:
       - "Input - ARRI - V3 LogC (EI800) - Alexa"
       - "Input - RED - Log3G10 - REDWideGamutRGB"

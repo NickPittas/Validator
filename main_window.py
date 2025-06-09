@@ -177,15 +177,12 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(self.splitter)
 
         # Rules Editor (Left Pane of Splitter)
-        self.rules_editor_widget = RulesEditorWidget()
+        self.rules_editor_widget = RulesEditorWidget(parent=self)
         # Ensure RulesEditorWidget uses the same rules file path
         self.rules_editor_widget.rules_yaml_path = self.rules_file_path
         self.rules_editor_widget.load_rules_from_yaml() # Load its content
         self.splitter.addWidget(self.rules_editor_widget)
         self.rules_editor_widget.setVisible(False) # Initially hidden
-        
-        # Connect rules editor to main window for YAML updates
-        self.rules_editor_widget.parent = lambda: self
 
         results_container = QtWidgets.QWidget()
         results_layout = QtWidgets.QVBoxLayout(results_container)

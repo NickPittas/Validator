@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 import time
 import psutil
 import re
+import tempfile
 
 from PySide6 import QtWidgets
 # Global instance to keep track of the panel
@@ -31,6 +32,19 @@ def launch_rules_editor_panel():
     _rules_editor_panel_instance = RulesEditorWidget() # Assuming RulesEditorWidget can be parentless for a top-level window
     _rules_editor_panel_instance.setWindowTitle("Nuke Rules Editor")
     _rules_editor_panel_instance.show()
+
+def get_debug_file_path(filename):
+    """
+    Get a path to a debug file in the system's temporary directory.
+    
+    Args:
+        filename: Base filename for the debug file
+        
+    Returns:
+        Full path to the debug file in the temp directory
+    """
+    return os.path.join(tempfile.gettempdir(), filename)
+
 class NukeValidator:
     def __init__(self, rules_file: str = None):
         """
@@ -165,37 +179,43 @@ class NukeValidator:
     def _check_colorspaces(self, nodes: List[nuke.Node]):
         """
         Check colorspace settings for Read and Write nodes with intelligent matching
+        using dedicated lists from YAML configuration
         
         Args:
             nodes: List of Nuke nodes
         """
-        if 'colorspaces' not in self.rules:
-            return
-            
+        # Check if we have the required configuration
+        read_colorspaces = self.rules.get('read_node_allowed_colorspaces', [])
+        write_colorspaces = self.rules.get('write_node_allowed_colorspaces', [])
+        
+        # Get severity settings
+        read_severity = self.rules.get('colorspaces', {}).get('Read', {}).get('severity', 'warning')
+        write_severity = self.rules.get('colorspaces', {}).get('Write', {}).get('severity', 'warning')
+        
         for node in nodes:
-            if node.Class() == 'Read' and 'Read' in self.rules['colorspaces']:
+            if node.Class() == 'Read' and read_colorspaces:
                 colorspace = node['colorspace'].value()
-                if not self._is_colorspace_allowed(colorspace, self.rules['colorspaces']['Read']['allowed']):
+                if not self._is_colorspace_allowed(colorspace, read_colorspaces):
                     issue = {
                         'type': 'colorspace',
                         'node': node.name(),
                         'node_type': 'Read',
                         'current': colorspace,
-                        'allowed': self.rules['colorspaces']['Read']['allowed'],
-                        'severity': self.rules['colorspaces']['Read'].get('severity', 'warning')
+                        'allowed': read_colorspaces,
+                        'severity': read_severity
                     }
                     self.issues.append(issue)
                     
-            elif node.Class() == 'Write' and 'Write' in self.rules['colorspaces']:
+            elif node.Class() == 'Write' and write_colorspaces:
                 colorspace = node['colorspace'].value()
-                if not self._is_colorspace_allowed(colorspace, self.rules['colorspaces']['Write']['allowed']):
+                if not self._is_colorspace_allowed(colorspace, write_colorspaces):
                     issue = {
                         'type': 'colorspace',
                         'node': node.name(),
                         'node_type': 'Write',
                         'current': colorspace,
-                        'allowed': self.rules['colorspaces']['Write']['allowed'],
-                        'severity': self.rules['colorspaces']['Write'].get('severity', 'warning')
+                        'allowed': write_colorspaces,
+                        'severity': write_severity
                     }
                     self.issues.append(issue)
     
@@ -220,16 +240,57 @@ class NukeValidator:
         
         current_norm = normalize_colorspace(current_colorspace)
         
-        # Define colorspace aliases and patterns
+        # Define colorspace aliases and patterns with expanded mappings for Nuke's verbose names
         colorspace_patterns = {
-            'acescg': ['acescg', 'aces', 'acesCg', 'aces-acescg', 'acesapplied'],
+            'acescg': ['acescg', 'aces', 'acesCg', 'aces-acescg', 'acesapplied', 'acescglin'],
+            'aces2065': ['aces2065', 'aces20651', 'aces-2065-1'],
             'linear': ['linear', 'scenelinear', 'scene_linear', 'scenereferred', 'lin'],
             'srgb': ['srgb', 'sRGB', 'inputsrgb', 'input-srgb', 'outputsrgb', 'output-srgb'],
             'rec709': ['rec709', 'rec.709', 'inputrec709', 'input-rec709', 'outputrec709', 'output-rec709', 'r709'],
-            'log': ['log', 'logc', 'alog', 'arri'],
+            'log': ['log', 'logc', 'alog', 'arri', 'log3g10'],
             'p3': ['p3', 'p3d65', 'displayp3', 'dci-p3'],
-            'rec2020': ['rec2020', 'rec.2020', 'bt2020', 'bt.2020']
+            'rec2020': ['rec2020', 'rec.2020', 'bt2020', 'bt.2020'],
+            'sgamut': ['sgamut', 'sgamut3', 'sgamut3cine', 'slog3']
         }
+        
+        # Map from Nuke's verbose colorspace names to their short codes
+        verbose_to_short = {
+            # ACEScg variants
+            'aces - acescg': 'acescglin',
+            'acescg': 'acescglin',
+            'scene_linear (aces - acescg)': 'acescglin',
+            'compositing_linear (aces - acescg)': 'acescglin',
+            'rendering (aces - acescg)': 'acescglin',
+            'utility - linear - acescg': 'acescglin',
+            
+            # ACES2065-1 variants
+            'aces - aces2065-1': 'aces2065',
+            'aces2065-1': 'aces2065',
+            
+            # Other colorspaces
+            'input - arri - v3 logc (ei800) - alexa': 'logc',
+            'input - red - log3g10 - redwidegamutrgb': 'log3g10',
+            'input - sony - slog3 - sgamut3.cine': 'slog3',
+            'input - srgb': 'srgb',
+            'input - rec.709': 'rec709',
+            'output - srgb': 'srgb',
+            'output - rec.709': 'rec709',
+            'output - rec.2020': 'rec2020',
+            'output - p3-dci': 'p3',
+            'utility - linear - srgb': 'linear',
+            'utility - raw': 'raw',
+            'utility - log': 'log'
+        }
+        
+        # Check if the current colorspace is a verbose name with a known short code
+        current_norm_lower = current_colorspace.lower()
+        if current_norm_lower in verbose_to_short:
+            short_code = verbose_to_short[current_norm_lower]
+            # Check if any allowed colorspace matches this short code
+            for allowed in allowed_colorspaces:
+                allowed_norm = normalize_colorspace(allowed)
+                if short_code == allowed_norm or short_code in allowed_norm:
+                    return True
         
         # Check if current colorspace matches any pattern group
         for pattern_group, patterns in colorspace_patterns.items():
@@ -241,7 +302,7 @@ class NukeValidator:
                         return True
         
         # Check for partial matches with key terms
-        key_terms = ['acescg', 'linear', 'srgb', 'rec709', 'log', 'p3', 'rec2020']
+        key_terms = ['acescg', 'aces2065', 'linear', 'srgb', 'rec709', 'log', 'p3', 'rec2020', 'sgamut']
         current_terms = [term for term in key_terms if term in current_norm]
         
         if current_terms:
@@ -257,26 +318,63 @@ class NukeValidator:
         """
         Provide detailed validation feedback using the sophisticated template-based validation
         from the UI system instead of basic regex checking.
+        
+        Args:
+            filename: The filename to validate
+            pattern_str: The regex pattern to validate against (used as fallback)
+            
+        Returns:
+            list: List of validation errors, empty if valid
         """
+        # First check if filename is empty to avoid unnecessary processing
+        if not filename:
+            return ["Empty filename provided"]
+            
         try:
+            # DEBUG: Log validation attempt with more details
+            print(f"[DEBUG] ===== DETAILED VALIDATION START =====")
+            print(f"[DEBUG] Validating filename: '{filename}'")
+            print(f"[DEBUG] Using pattern: '{pattern_str}'")
+            
+            # Write to debug file for persistent logging
+            with open(get_debug_file_path("validator_received_filename.txt"), "a") as f:
+                f.write(f"DETAILED VALIDATION:\nFilename: '{filename}'\nPattern: '{pattern_str}'\n\n")
+            
             # Import the sophisticated validation from the UI
-            from nuke_validator_ui import FilenameRuleEditor
+            try:
+                from nuke_validator_ui import FilenameRuleEditor, FILENAME_TOKENS
+                print(f"[Validator] Successfully imported UI validation components")
+            except ImportError as import_err:
+                print(f"[Validator] UI import failed: {import_err}")
+                print(f"[Validator] Falling back to basic validation")
+                # Make sure to return all errors from basic validation
+                basic_errors = self._basic_filename_validation(filename, pattern_str)
+                print(f"[Validator] Basic validation returned {len(basic_errors)} errors")
+                return basic_errors
             
             # Check if we have filename tokens in the rules (from the UI system)
             filename_tokens = self.rules.get('file_paths', {}).get('filename_tokens', [])
             
-            if filename_tokens:
+            if not filename_tokens:
+                print(f"[Validator] No filename tokens found in rules, falling back to basic validation")
+                # Make sure to return all errors from basic validation
+                basic_errors = self._basic_filename_validation(filename, pattern_str)
+                print(f"[Validator] Basic validation returned {len(basic_errors)} errors")
+                return basic_errors
+            
+            try:
                 # Create a temporary FilenameRuleEditor to use its validation logic
                 temp_editor = FilenameRuleEditor()
                 
                 # Load the token configuration from rules
+                token_loaded = False
                 for token_cfg in filename_tokens:
                     if "name" in token_cfg:
                         # Find the token definition
-                        from nuke_validator_ui import FILENAME_TOKENS
                         token_def = next((t for t in FILENAME_TOKENS if t["name"] == token_cfg["name"]), None)
                         if token_def:
                             temp_editor.template_builder.add_token(token_def)
+                            token_loaded = True
                             
                             # Set the control values from the saved configuration
                             if temp_editor.template_builder.token_widgets:
@@ -287,65 +385,216 @@ class NukeValidator:
                                     config["value"] = token_cfg.get("value")
                                     config["separator"] = token_cfg.get("separator", "_")
                 
+                if not token_loaded:
+                    print(f"[Validator] Failed to load any tokens, falling back to basic validation")
+                    return self._basic_filename_validation(filename, pattern_str)
+                    
                 # Generate the regex pattern
                 temp_editor.update_regex()
                 
                 # Use the sophisticated validation from the UI
                 detailed_errors = temp_editor.get_validation_errors(filename)
+                print(f"[DEBUG] Completed detailed validation with {len(detailed_errors)} errors")
+                if detailed_errors:
+                    print(f"[DEBUG] Errors found: {detailed_errors}")
+                else:
+                    print(f"[DEBUG] No errors found - filename is valid")
+                
+                print(f"[DEBUG] ===== DETAILED VALIDATION END =====")
+                
+                # Write results to debug file
+                with open(get_debug_file_path("validator_received_filename.txt"), "a") as f:
+                    f.write(f"Validation result: {len(detailed_errors)} errors\n")
+                    if detailed_errors:
+                        f.write(f"Errors: {detailed_errors}\n\n")
+                    else:
+                        f.write("No errors - filename is valid\n\n")
                 
                 if detailed_errors:
+                    # Ensure we return the detailed errors for display to the user
+                    print(f"[DEBUG] Returning {len(detailed_errors)} detailed errors to caller")
                     return detailed_errors
                 else:
                     return []  # No errors found
+                    
+            except AttributeError as attr_err:
+                # Specific handling for common attribute errors (e.g., missing methods)
+                print(f"[Validator] UI attribute error: {attr_err}")
+                # Make sure to return all errors from basic validation
+                basic_errors = self._basic_filename_validation(filename, pattern_str)
+                print(f"[Validator] Basic validation returned {len(basic_errors)} errors")
+                return basic_errors
             
-            # Fallback to basic validation if no template configuration available
-            return self._basic_filename_validation(filename, pattern_str)
-            
-        except ImportError:
-            # If UI components aren't available, fall back to basic validation
-            return self._basic_filename_validation(filename, pattern_str)
         except Exception as e:
-            return [f"Validation system error: {str(e)}"]
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"[Validator] Unexpected error in validation: {e}")
+            print(f"[Validator] Error details: {error_details}")
+            # Still provide some feedback rather than crashing
+            return [f"Validation system error: {str(e)}", 
+                    "Contact administrator if this error persists"]
     
-    def _basic_filename_validation(self, filename, pattern_str):
+    def _basic_filename_validation(self, filename, pattern_str=None):
         """
-        Basic fallback validation for when the sophisticated UI validation isn't available.
+        Basic filename validation using regex patterns and token-based validation.
+            pattern_str: Optional regex pattern override
+        
+        Returns:
+            List of validation errors, empty if validation passed
         """
         import re
         errors = []
         
-        if not pattern_str or not filename:
-            return ["No regex pattern defined"]
-            
-        try:
-            # First try full match
-            if re.match(pattern_str, filename):
-                return []  # No errors
+        print(f"[DEBUG] ===== BASIC VALIDATION START =====")
+        print(f"[DEBUG] Validating filename: '{filename}'")
+        
+        # Write to debug file
+        with open(get_debug_file_path("validator_received_filename.txt"), "a") as f:
+            f.write(f"BASIC VALIDATION:\nFilename: '{filename}'\n")
+        
+        if not filename:
+            print(f"[DEBUG] Filename is empty")
+            return ["Filename is empty"]
+        
+        # Get the pattern and tokens configuration
+        if not pattern_str:
+            pattern_str = self.rules.get('file_paths', {}).get('filename_template', '')
+            if not pattern_str:
+                print(f"[DEBUG] No filename pattern defined in rules")
+                return ["No filename pattern defined in rules"]
                 
-            # Basic pattern analysis
-            print(f"[BasicValidation] Analyzing filename: {filename}")
-            print(f"[BasicValidation] Against pattern: {pattern_str}")
+        print(f"[DEBUG] Original pattern: '{pattern_str}'")
+        
+        # Fix any quantifiers that might not have proper syntax (e.g., \d4 -> \d{4})
+        pattern_str = re.sub(r'\\d(\d+)(?!\\})', r'\\d{\1}', pattern_str)
+        # Fix character class quantifiers (e.g., [A-Za-z]4 -> [A-Za-z]{4})
+        pattern_str = re.sub(r'(\[[^\]]+\])(\d+)(?!\})', r'\1{\2}', pattern_str)
+        # Handle sequence token with MIN_VAL,MAX_VAL format
+        pattern_str = pattern_str.replace("MIN_VAL,MAX_VAL", "3,4")  # Default to 3-4 characters
+        
+        print(f"[DEBUG] Processed pattern: '{pattern_str}'")
+        
+        # Write pattern to debug file
+        with open(get_debug_file_path("validator_received_filename.txt"), "a") as f:
+            f.write(f"Original pattern: '{pattern_str}'\n")
+            f.write(f"Processed pattern: '{pattern_str}'\n")
+        # Get token definitions for detailed validation if needed
+        filename_tokens = self.rules.get('file_paths', {}).get('filename_tokens', [])
+        try:
+            # Step 1: Try full regex match first for quick validation
+            pattern = re.compile(pattern_str)
+            match = pattern.match(filename)
             
-            # Common issue 1: LL18012k should be LL180_12k
-            ll_resolution_match = re.search(r'LL(\d+)(\d+k)', filename)
-            if ll_resolution_match:
-                ll_part = ll_resolution_match.group(1)
-                res_part = ll_resolution_match.group(2)
-                if ll_part in ['180', '360'] and res_part in ['1k', '2k', '4k', '6k', '8k', '12k', '16k', '19k']:
-                    full_match = ll_resolution_match.group(0)
-                    suggested = f"LL{ll_part}_{res_part}"
-                    errors.append(f"Pixel mapping format: '{full_match}' should be '{suggested}' (needs separator)")
-                    return errors  # Return early with this specific error
+            print(f"[DEBUG] Attempting regex match: '{filename}' against pattern '{pattern_str}'")
+            print(f"[DEBUG] Match result: {match is not None}")
             
-            # If no specific pattern detected, provide general feedback
-            errors.append(f"Filename '{filename}' doesn't match expected pattern. Check token order and separators.")
-            return errors
+            # Write match result to debug file
+            with open(get_debug_file_path("validator_received_filename.txt"), "a") as f:
+                f.write(f"Regex match result: {match is not None}\n")
+            
+            if match:
+                # Full regex match succeeded
+                print(f"[DEBUG] Full regex match succeeded")
+                # Check for version formatting issues
+                version_match = re.search(r'v(\d+)', filename, re.IGNORECASE)
+                if version_match:
+                    version_num = version_match.group(1)
+                    print(f"[DEBUG] Found version number: '{version_num}'")
+                    # Check if version number is properly zero-padded
+                    if len(version_num) < 3:  # Standard is at least 3 digits (v001)
+                        print(f"[DEBUG] Version number '{version_num}' not properly zero-padded")
+                        errors.append(f"Version number '{version_num}' should be zero-padded to at least 3 digits (e.g., v001)")
+                # If no version issues, filename is valid
+                if not errors:
+                    print(f"[DEBUG] No errors, validation passed")
+                    print(f"[DEBUG] ===== BASIC VALIDATION END =====")
+                    return []  # No errors, validation passed
+            else:
+                # Step 2: Full regex match failed, perform token-by-token validation
+                print(f"[DEBUG] Full regex match failed")
+                # Only proceed with detailed validation if we have token definitions
+                if filename_tokens:
+                    # Use token-by-token validation for detailed error messages
+                    token_errors = self._validate_by_tokens(filename, filename_tokens)
+                    if token_errors:
+                        print(f"[DEBUG] Token validation returned {len(token_errors)} specific errors")
+                        errors.extend(token_errors)
+                    else:
+                        print(f"[DEBUG] Token validation returned no specific errors")
+                    # No need for additional checks if token validation gave us details
+                    return errors
+                # If we don't have token definitions, fall back to general checks
+                # Check for common separator issues
+                if '_' in pattern_str and '_' not in filename:
+                    errors.append("Missing underscores between tokens (e.g., 'abc123' should be 'abc_123')")
+                # Check for sequence+shot format issues
+                seq_shot_pattern = re.search(r'\[A-Za-z\]{([\d,]+)}\\d{(\d+)}', pattern_str)
+                if seq_shot_pattern:
+                    # Extract the sequence and shot number constraints
+                    seq_range = seq_shot_pattern.group(1)  # e.g., "3,4"
+                    shot_digits = seq_shot_pattern.group(2)  # e.g., "4"
+                    # Create a specific regex to match at the start of the filename
+                    seq_shot_regex = fr"^[A-Za-z]{{{seq_range}}}\d{{{shot_digits}}}"
+                    seq_shot_match = re.search(seq_shot_regex, filename)
+                    if not seq_shot_match:
+                        # Check if they might be wrongly separated
+                        seq_only_match = re.search(fr"^[A-Za-z]{{{seq_range}}}", filename)
+                        if seq_only_match:
+                            errors.append(f"Sequence format correct but shot number format incorrect or missing")
+                        else:
+                            errors.append(f"Invalid sequence format - should be {seq_range} letters followed by {shot_digits} digits")
+                # Check for file extension issues
+                if '.' in pattern_str:
+                    ext_match = re.search(r'\.([a-zA-Z0-9]+)$', filename)
+                    pattern_ext_match = re.search(r'\.([a-zA-Z0-9]+)', pattern_str)
+                    if not ext_match:
+                        errors.append("Missing file extension")
+                    elif pattern_ext_match and ext_match.group(1).lower() != pattern_ext_match.group(1).lower():
+                        errors.append(f"Incorrect file extension: found '.{ext_match.group(1)}', expected '.{pattern_ext_match.group(1)}'")
+                    # Try to provide more specific guidance based on pattern structure
+                    pattern_parts = pattern_str.replace('^', '').replace('$', '').split('_')
+                    filename_parts = filename.split('_')
+                    
+                    # Compare number of parts
+                    if len(pattern_parts) != len(filename_parts):
+                        errors.append(f"Expected {len(pattern_parts)} parts separated by '_', found {len(filename_parts)} parts")
+                    
+                    # Compare each part individually
+                    for i, (pattern_part, filename_part) in enumerate(zip(pattern_parts, filename_parts)):
+                        try:
+                            # Fix any quantifier syntax issues in individual parts
+                            pattern_part = re.sub(r'\\d(\d+)(?!\})', r'\\d{\1}', pattern_part)
+                            if not re.match(f"^{pattern_part}$", filename_part):
+                                errors.append(f"Part {i+1} '{filename_part}' doesn't match expected format '{pattern_part}'")
+                        except Exception:
+                            # Skip problematic part comparisons without printing
+                            pass
+                
+                # If still no specific errors detected, provide a general message
+                if not errors:
+                    errors.append(f"Filename '{filename}' doesn't match the expected pattern. Check format and separators.")
+                
+                return errors
             
         except re.error as e:
-            return [f"Regex error: {str(e)}"]
+            print(f"[DEBUG] Regex error: {str(e)}")
+            print(f"[DEBUG] ===== BASIC VALIDATION END =====")
+            
+            # Write error to debug file
+            with open(get_debug_file_path("validator_received_filename.txt"), "a") as f:
+                f.write(f"Regex error: {str(e)}\n\n")
+                
+            return [f"Regex validation error: {str(e)}", "Check the pattern configuration in rules.yaml"]
         except Exception as e:
+            print(f"[DEBUG] Validation error: {str(e)}")
+            print(f"[DEBUG] ===== BASIC VALIDATION END =====")
+            
+            # Write error to debug file
+            with open(get_debug_file_path("validator_received_filename.txt"), "a") as f:
+                f.write(f"Validation error: {str(e)}\n\n")
+                
             return [f"Validation error: {str(e)}"]
-
+    
     def _check_file_paths_and_naming(self, nodes: List[nuke.Node]):
         """
         Check file paths (relative/absolute) and naming conventions for Write nodes.
@@ -399,22 +648,70 @@ class NukeValidator:
                     })
                     continue
                 try:
-                    print(f"[Validator] Checking filename '{filename}' against regex: {pattern_str}")
-                    if not re.match(pattern_str, filename):
+                    print(f"[DEBUG] ===== VALIDATION CHECK IN _check_file_paths_and_naming =====")
+                    print(f"[DEBUG] Checking filename '{filename}' against regex: {pattern_str}")
+                    
+                    # Write to debug file
+                    with open(get_debug_file_path("regex_debug.txt"), "a") as f:
+                        f.write(f"Checking filename: '{filename}'\n")
+                        f.write(f"Against pattern: '{pattern_str}'\n")
+                    
+                    match_result = re.match(pattern_str, filename)
+                    print(f"[DEBUG] Match result: {match_result is not None}")
+                    
+                    # Write match result to debug file
+                    with open(get_debug_file_path("regex_debug.txt"), "a") as f:
+                        f.write(f"Match result: {match_result is not None}\n\n")
+                    
+                    if not match_result:
+                        print(f"[DEBUG] No match - proceeding to detailed validation")
                         # Use detailed validation instead of generic regex error
                         detailed_errors = self._validate_filename_detailed(filename, pattern_str)
                         
                         if detailed_errors:
                             # Create specific error for the most important issues
                             primary_error = detailed_errors[0]  # Take the first/most important error
+                            
+                            # Extract token name from error message if possible
+                            token_name = "unknown"
+                            for error in detailed_errors:
+                                if "Invalid '" in error and "': " in error:
+                                    # Extract the token name from error messages like "Invalid 'TokenName': ..."
+                                    # This correctly identifies which token has the validation error
+                                    token_name = error.split("Invalid '")[1].split("': ")[0]
+                                    print(f"[DEBUG] Extracted token name from error: '{token_name}'")
+                                    break
+                            
+                            # Ensure we have a clear primary message that indicates this is a filename issue
+                            # We don't need to add the redundant placeholder message anymore
+                            # The base message in the details string will serve this purpose
+                            
+                            # Create a more descriptive primary error message
+                            primary_message = f"Filename format error: {primary_error}"
+                            
+                            # Log the detailed errors for debugging
+                            print(f"[DEBUG] Detailed validation errors: {detailed_errors}")
+                            
+                            # Directly construct the details string to include base message and all token errors
+                            # Start with a base message about filename format
+                            base_message = "Filename doesn't match the expected format:"
+                            
+                            # Filter out the redundant placeholder message
+                            filtered_errors = [error for error in detailed_errors if error != "Filename doesn't match the expected format - see specific token errors below"]
+                            
+                            # Ensure we're using all errors from _validate_by_tokens
+                            # This is critical for displaying the correct token-specific error messages
+                            details = base_message + "\n" + "\n".join([f"- {error}" for error in filtered_errors]) if filtered_errors else base_message
+                            
                             self.issues.append({
                                 'type': 'naming_convention_violation',
                                 'node': node.name(),
                                 'node_type': 'Write',
                                 'current': filename,
-                                'expected': primary_error,
+                                'expected': primary_message,
                                 'severity': severity_naming,
-                                'details': detailed_errors  # Include all errors for detailed view
+                                'details': details,  # Directly constructed details string with base message and all token errors
+                                'token_name': token_name  # Add the token name that caused the failure
                             })
                         else:
                             # Fallback if detailed validation doesn't catch anything
@@ -435,45 +732,239 @@ class NukeValidator:
                         'expected': f"Valid regex pattern. Error: {e}",
                         'severity': 'error'
                     })
-    def _validate_tokens(self, filename, token_defs):
+    # The deprecated _validate_tokens method has been removed in favor of the new _validate_by_tokens method
+    # that provides detailed token-by-token validation with better error reporting
+        
+    def _validate_by_tokens(self, filename, token_definitions):
         """
-        Validate tokens in the filename using token_definitions from rules.yaml.
-        Returns a list of issues (with type, current, expected, token, and optionally auto_fix info).
+        Validates a filename by individually checking each token based on the token definitions from YAML.
+        This method is called when the full regex match fails and provides detailed error messages.
+        
+        Args:
+            filename (str): The filename to validate
+            token_definitions (list): List of token definitions from YAML
+            
+        Returns:
+            list: List of validation errors, empty if all tokens are valid
+            
+        Note:
+            This function ONLY returns error strings and does NOT create separate validation issues.
+            The returned error strings will be used in the 'details' field of a single
+            'naming_convention_violation' issue created by the calling function.
         """
-        issues = []
-        # Example: parse tokens from filename using regexes from token_defs
-        # This assumes tokens are separated by underscores or known delimiters
-        # You may want to make this more robust for your actual template
-        for token, tdef in token_defs.items():
-            regex = tdef.get('regex')
-            if not regex:
-                continue
-            m = re.search(regex, filename)
-            if not m:
-                issues.append({
-                    'type': f'token_{token}_invalid',
-                    'token': token,
-                    'current': filename,
-                    'expected': tdef.get('description', ''),
-                    'auto_fix': tdef.get('auto_fix', False),
-                    'pad_to': tdef.get('pad_to', None),
-                    'tooltip': tdef.get('tooltip', ''),
-                })
+        print(f"[DEBUG] ===== TOKEN VALIDATION START =====")
+        print(f"[DEBUG] Validating filename: '{filename}'")
+        print(f"[DEBUG] Token definitions count: {len(token_definitions) if token_definitions else 0}")
+        
+        # Write to debug file
+        with open(get_debug_file_path("pattern_debug.txt"), "a") as f:
+            f.write(f"TOKEN VALIDATION:\nFilename: '{filename}'\n")
+            f.write(f"Token definitions: {token_definitions}\n\n")
+        
+        if not filename or not token_definitions:
+            error_msg = "Cannot validate: Missing filename or token definitions"
+            print(f"[DEBUG] {error_msg}")
+            return [error_msg]
+            
+        errors = []
+        remaining_filename = filename
+        expected_pattern = ""
+        
+        # Keep track of separators between tokens
+        separator = ""
+        
+        for i, token_def in enumerate(token_definitions):
+            # Get the token configuration
+            token_name = token_def.get("name")
+            token_type = token_def.get("type", "static")
+            token_required = token_def.get("required", True)
+            token_pattern = token_def.get("regex", "")
+            
+            print(f"[DEBUG] Processing token {i+1}: {token_name} (type: {token_type})")
+            print(f"[DEBUG] Token required: {token_required}")
+            print(f"[DEBUG] Initial pattern: '{token_pattern}'")
+            
+            # If there's a custom separator, use it
+            if "separator" in token_def:
+                separator = token_def["separator"]
+                print(f"[DEBUG] Using separator: '{separator}'")
+
+            
+            # Special handling for different token types
+            if token_type == "static":
+                # Static tokens have fixed regex patterns
+                pass
+            elif token_type == "range":
+                # Range tokens (like sequence) need to replace MIN_VAL,MAX_VAL placeholders
+                min_val = token_def.get("min_value", token_def.get("min", 2))
+                max_val = token_def.get("max_value", token_def.get("max", 4))
+                token_pattern = token_pattern.replace("MIN_VAL,MAX_VAL", f"{min_val},{max_val}")
+                print(f"[DEBUG] Range token: min={min_val}, max={max_val}")
+                print(f"[DEBUG] Updated pattern: '{token_pattern}'")
+            elif token_type == "numeric":
+                # Numeric tokens (like shot number) need to handle padding
+                digits = token_def.get("digits", 4)
+                # Ensure \d{n} format for digit matching
+                if not re.search(r'\\d\{\d+\}', token_pattern):
+                    token_pattern = f"\\d{{{digits}}}"
+                    print(f"[DEBUG] Numeric token with {digits} digits")
+                    print(f"[DEBUG] Updated pattern: '{token_pattern}'")
+            elif token_type == "enum":
+                # Enum tokens (dropdown or multiselect)
+                options = token_def.get("values", [])
+                if options:
+                    # Create regex pattern for alternatives
+                    token_pattern = f"({'|'.join(re.escape(opt) for opt in options)})"
+                    print(f"[DEBUG] Enum token with options: {options}")
+                    print(f"[DEBUG] Updated pattern: '{token_pattern}'")
+            
+            try:
+                # Build the part of the pattern to match against the remaining filename
+                pattern_to_match = token_pattern
+                
+                # Add separator to the pattern if available and not the last token
+                if separator and i < len(token_definitions) - 1:
+                    pattern_to_match += re.escape(separator)
+                    print(f"[DEBUG] Added separator to pattern: '{pattern_to_match}'")
+                
+                # Try to match against the start of the remaining filename
+                print(f"[DEBUG] Attempting to match pattern '{pattern_to_match}' against '{remaining_filename}'")
+                try:
+                    match_pattern = f"^{pattern_to_match}"
+                    print(f"[DEBUG] Full match pattern: '{match_pattern}'")
+                    match = re.match(match_pattern, remaining_filename)
+                except re.error as e:
+                    print(f"[DEBUG] Regex error: {str(e)}")
+                    print(f"[DEBUG] Trying alternate pattern format")
+                    match_pattern = r"^" + pattern_to_match
+                    print(f"[DEBUG] Alternate match pattern: '{match_pattern}'")
+                    match = re.match(match_pattern, remaining_filename)
+                
+                print(f"[DEBUG] Match result: {match is not None}")
+                
+                if not match:
+                    # If the token is required, report an error
+                    if token_required:
+                        # If there's no match and the token is required, add a specific error
+                        display_name = token_def.get("label", token_name)
+                        print(f"[DEBUG] No match for required token '{display_name}'")
+                        
+                        # Get the expected pattern for better error messages
+                        expected_pattern = token_def.get("description", "")
+                        
+                        # Extract the actual content that failed to match
+                        # Use the first part of remaining_filename up to the next separator or end
+                        actual_content = remaining_filename
+                        if separator and separator in actual_content:
+                            actual_content = actual_content.split(separator)[0]
+                        
+                        # Limit the actual content to a reasonable length for display
+                        if len(actual_content) > 20:
+                            actual_content = actual_content[:20] + "..."
+                        
+                        # Generate more specific error messages based on token type and name
+                        # Generate more specific error messages based on token type, not token name
+                        if token_type == "range":
+                            error_msg = f"Invalid '{display_name}': Expected {min_val}-{max_val} letters but found '{actual_content}'"
+                            print(f"[DEBUG] Adding error: {error_msg}")
+                            errors.append(error_msg)
+                        elif token_type == "numeric":
+                            error_msg = f"Invalid '{display_name}': Expected {digits} digits but found '{actual_content}'"
+                            print(f"[DEBUG] Adding error: {error_msg}")
+                            errors.append(error_msg)
+                        elif token_type == "enum":
+                            error_msg = f"Invalid '{display_name}': Expected one of [{', '.join(options)}] but found '{actual_content}'"
+                            print(f"[DEBUG] Adding error: {error_msg}")
+                            errors.append(error_msg)
+                        elif token_type == "static" and "value" in token_def:
+                            expected_value = token_def.get("value", "")
+                            error_msg = f"Invalid '{display_name}': Expected '{expected_value}' but found '{actual_content}'"
+                            print(f"[DEBUG] Adding error: {error_msg}")
+                            errors.append(error_msg)
+                        else:
+                            # Include the expected pattern in the error message if available
+                            if expected_pattern:
+                                error_msg = f"Invalid '{display_name}': Expected format '{expected_pattern}' but found '{actual_content}'"
+                            else:
+                                error_msg = f"Invalid '{display_name}' format: Found '{actual_content}'"
+                            print(f"[DEBUG] Adding error: {error_msg}")
+                            errors.append(error_msg)
+                            
+                        if separator:
+                            # Improved separator check: if the next character is not the expected separator, report missing separator
+                            prev_token_name = token_definitions[i-1]["name"] if i > 0 else None
+                            print(f"[DEBUG] Checking for separator '{separator}' in '{remaining_filename}'")
+                            if not remaining_filename.startswith(separator):
+                                prev_display_name = token_definitions[i-1].get("label", prev_token_name) if i > 0 else None
+                                current_display_name = token_def.get("label", token_name)
+                                
+                                if prev_display_name:
+                                    error_msg = f"Missing separator '{separator}' between '{prev_display_name}' and '{current_display_name}'"
+                                    print(f"[DEBUG] Adding error: {error_msg}")
+                                    errors.append(error_msg)
+                                else:
+                                    error_msg = f"Missing separator '{separator}' before '{current_display_name}'"
+                                    print(f"[DEBUG] Adding error: {error_msg}")
+                                    errors.append(error_msg)
+                        break
+                    else:
+                        # Token is optional, skip it
+                        print(f"[DEBUG] Token '{token_name}' is optional, skipping")
+                        continue
+                else:
+                    # Matched successfully, remove the matched part and continue
+                    matched_part = match.group(0)
+                    print(f"[DEBUG] Successfully matched: '{matched_part}'")
+                    remaining_filename = remaining_filename[len(matched_part):]
+                    print(f"[DEBUG] Remaining filename: '{remaining_filename}'")
+                    
+                    # Remove separator from remaining if it was part of the match
+                    if separator and i < len(token_definitions) - 1 and remaining_filename.startswith(separator):
+                        print(f"[DEBUG] Removing separator '{separator}' from remaining filename")
+                        remaining_filename = remaining_filename[len(separator):]
+                        print(f"[DEBUG] Remaining filename after separator removal: '{remaining_filename}'")
+                    
+            except re.error as e:
+                error_msg = f"Error in regex pattern for {token_name}: {str(e)}"
+                print(f"[DEBUG] Regex error: {error_msg}")
+                errors.append(error_msg)
+                break
+            except Exception as e:
+                error_msg = f"Validation error for {token_name}: {str(e)}"
+                print(f"[DEBUG] Exception: {error_msg}")
+                errors.append(error_msg)
+                break
+        
+        # After processing all tokens, check for unexpected trailing content
+        # Check if there's anything left in the filename that wasn't matched
+        print(f"[DEBUG] Token validation complete. Remaining filename: '{remaining_filename}'")
+        if not errors and remaining_filename:
+            # Try to identify what the unexpected content might be
+            if '.' in remaining_filename:
+                # It might be a file extension or something with an extension
+                file_ext = remaining_filename.split('.')[-1]
+                error_msg = f"Unexpected content at the end: '{remaining_filename}' (possibly incorrect file extension '{file_ext}')"
             else:
-                # If padding is required, check it
-                if tdef.get('auto_fix', False) and tdef.get('pad_to'):
-                    val = m.group(0)
-                    if val.isdigit() and len(val) != tdef['pad_to']:
-                        issues.append({
-                            'type': f'token_{token}_padding',
-                            'token': token,
-                            'current': val,
-                            'expected': f"{token} should be zero-padded to {tdef['pad_to']} digits",
-                            'auto_fix': True,
-                            'pad_to': tdef['pad_to'],
-                            'tooltip': tdef.get('tooltip', ''),
-                        })
-        return issues
+                error_msg = f"Unexpected content at the end: '{remaining_filename}'"
+            print(f"[DEBUG] Adding error: {error_msg}")
+            errors.append(error_msg)
+        
+        print(f"[DEBUG] Validation result: {len(errors)} errors")
+        if errors:
+            print(f"[DEBUG] Errors: {errors}")
+        
+        # Write results to debug file
+        with open(get_debug_file_path("pattern_debug.txt"), "a") as f:
+            f.write(f"Validation result: {len(errors)} errors\n")
+            if errors:
+                f.write(f"Errors: {errors}\n\n")
+            else:
+                f.write("No errors - filename is valid\n\n")
+                
+        print(f"[DEBUG] ===== TOKEN VALIDATION END =====")
+            
+        # This function ONLY returns error strings and does NOT create validation issues
+        return errors
     def _check_bounding_boxes(self, nodes: List[nuke.Node]):
         """
         Check bounding boxes for Read and Write nodes
@@ -903,12 +1394,16 @@ class NukeValidator:
             if issue['type'] == 'colorspace':
                 if issue['node_type'] == 'Read':
                     node = nuke.toNode(issue['node'])
-                    node['colorspace'].setValue(self.rules['colorspaces']['Read']['allowed'][0])
-                    fixed += 1
+                    read_colorspaces = self.rules.get('read_node_allowed_colorspaces', [])
+                    if read_colorspaces:
+                        node['colorspace'].setValue(read_colorspaces[0])
+                        fixed += 1
                 elif issue['node_type'] == 'Write':
                     node = nuke.toNode(issue['node'])
-                    node['colorspace'].setValue(self.rules['colorspaces']['Write']['allowed'][0])
-                    fixed += 1
+                    write_colorspaces = self.rules.get('write_node_allowed_colorspaces', [])
+                    if write_colorspaces:
+                        node['colorspace'].setValue(write_colorspaces[0])
+                        fixed += 1
             elif issue['type'] == 'path_format':
                 node = nuke.toNode(issue['node'])
                 current_path = node['file'].value()
@@ -972,6 +1467,14 @@ class NukeValidator:
                 if 'expected' in issue:
                     report.append(f"   Expected: {issue['expected']}")
                 report.append(f"   Severity: {issue['severity']}")
+                
+                # Display detailed errors if available
+                if 'details' in issue and issue['details']:
+                    report.append(f"   Details: {issue['details']}")
+                    
+                    # If this is a naming convention violation, highlight the token name that caused the failure
+                    if issue['type'] == 'naming_convention_violation' and 'token_name' in issue:
+                        report.append(f"   Problem token: {issue['token_name']}")
 
         return "\n".join(report)
 

@@ -50,7 +50,7 @@ DEFAULT_NAMING_TOKENS: Dict[str, Dict[str, Any]] = {
         "separator": "_"
     },
     "description": {
-        "regex": ".+?",
+        "regex": "[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*",
         "description": "Single word or hyphenated description.",
         "examples": ["concept", "layout", "comp", "previz", "roto", "dmp", "roto-main", "compFinal"],
         "separator": "_"
@@ -62,7 +62,7 @@ DEFAULT_NAMING_TOKENS: Dict[str, Dict[str, Any]] = {
         "separator": "" # No separator after if it's followed by resolution directly
     },
     "resolution": {
-        "regex": "\\d{1,2}[kK]",
+        "regex": "\\d{1,2}k",
         "description": "Resolution abbreviation (e.g., 1k, 4k, 19k).",
         "examples": ["1k", "2k", "4k", "8k", "12k", "16k", "19k", "32k"],
         "separator": "_"
@@ -124,7 +124,7 @@ FILENAME_TOKENS = [
     {
         "name": "description",
         "label": "<description>",
-        "regex_template": ".+?",
+        "regex_template": "[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*",
         "control": "static",
         "desc": "Description (letters, numbers, hyphens)"
     },
@@ -139,7 +139,7 @@ FILENAME_TOKENS = [
     {
         "name": "resolution",
         "label": "<resolution>",
-        "regex_template": "\\d{1,2}[kK]",
+        "regex_template": "\\d{1,2}k",
         "control": "static",
         "desc": "Resolution abbreviation (e.g., 1k, 4k)"
     },
@@ -650,21 +650,14 @@ class RulesEditorWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        # Store the parent explicitly
-        self.main_window_parent = parent
-        
-        # Default path for rules.yaml
         self.rules_yaml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules.yaml")
-        # Track the currently loaded YAML file name for display purposes
-        self.current_yaml_name = "rules.yaml"
         self.dropdown_yaml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules_dropdowns.yaml")
         self.dropdown_options = self._load_yaml_file(self.dropdown_yaml_path) or {}
         
         # Initialize attributes for dynamic filename validation
         self.filename_template = DEFAULT_FILENAME_TEMPLATE
         # Deepcopy might be good here if tokens are modified and reset later
-        self.filename_tokens = DEFAULT_NAMING_TOKENS.copy() # Retained for other potential uses, but FilenameRuleEditor will use dynamic tokens.
-        self.filename_tokens_for_editor = [] # Will hold token definitions for FilenameRuleEditor, loaded from YAML.
+        self.filename_tokens = DEFAULT_NAMING_TOKENS.copy()
 
         # --- Debug Prints for Dropdown Loading (can be removed later) ---
         print(f"DEBUG: RulesEditorWidget: Attempting to load dropdowns from: {self.dropdown_yaml_path}")
@@ -678,10 +671,6 @@ class RulesEditorWidget(QtWidgets.QWidget):
         else:
             print("DEBUG: RulesEditorWidget: dropdown_options is EMPTY or None after loading.")
         # --- End Debug Prints ---
-
-        # Prepare filename tokens for the editor using the global FILENAME_TOKENS master list
-        # This must be done BEFORE creating the FilenameRuleEditor
-        self._prepare_filename_tokens_for_editor()
 
         # Main layout for the entire RulesEditorWidget
         main_editor_layout = QtWidgets.QVBoxLayout(self)
@@ -718,11 +707,6 @@ class RulesEditorWidget(QtWidgets.QWidget):
 
         # Buttons (Save, Reload) - Placed below the splitter
         button_layout = QtWidgets.QHBoxLayout()
-        # Add a label to show which YAML file is being edited
-        self.current_file_label = QtWidgets.QLabel("Editing: rules.yaml")
-        self.current_file_label.setStyleSheet("QLabel { color: #4a9eff; font-weight: bold; }")
-        button_layout.addWidget(self.current_file_label)
-        
         save_button = QtWidgets.QPushButton("Save Rules to YAML")
         save_button.clicked.connect(self.save_rules_to_yaml)
         button_layout.addWidget(save_button)
@@ -735,8 +719,6 @@ class RulesEditorWidget(QtWidgets.QWidget):
         self.save_as_new_yaml_btn = QtWidgets.QPushButton("Save As New YAML")
         self.save_as_new_yaml_btn.clicked.connect(self._on_save_as_new_yaml)
         button_layout.addWidget(self.save_as_new_yaml_btn)
-        
-        # Remove debug button that was causing AttributeError
         
         main_editor_layout.addLayout(button_layout)
         
@@ -834,7 +816,7 @@ class RulesEditorWidget(QtWidgets.QWidget):
         convention_layout = QtWidgets.QVBoxLayout()
 
         # Filename Rule Editor
-        self.filename_rule_editor = FilenameRuleEditor(parent=self, available_tokens=self.filename_tokens_for_editor)
+        self.filename_rule_editor = FilenameRuleEditor()
         convention_layout.addWidget(self.filename_rule_editor)
 
         convention_group.setLayout(convention_layout)
@@ -1121,69 +1103,15 @@ class RulesEditorWidget(QtWidgets.QWidget):
         fp_rules['severity_relative_path'] = self._get_combobox_value(self.fp_severity_relative_combo)
         # Save dynamic naming convention parts
         fp_rules['filename_template'] = self.filename_rule_editor.regex_edit.text()
-        
-        # Get the template configuration from the template builder
-        template_config = self.filename_rule_editor.template_builder.get_template_config()
-        
-        # Update the token definitions with the latest from FILENAME_TOKENS
-        updated_tokens = []
-        for token_cfg in template_config:
-            token_name = token_cfg.get("name")
-            if token_name:
-                # Find the current master definition for this token
-                master_def = next((t for t in FILENAME_TOKENS if t["name"] == token_name), None)
-                if master_def:
-                    # Create a new token config with updated token_def from master
-                    updated_token = {
-                        "name": token_name,
-                        "token_def": master_def.copy(),  # Use the current master definition
-                        "value": token_cfg.get("value"),
-                        "separator": token_cfg.get("separator", "")
-                    }
-                    
-                    # ALWAYS ensure we're using the master regex_template for ALL tokens
-                    if "regex_template" in master_def:
-                        updated_token["token_def"]["regex_template"] = master_def["regex_template"]
-                        print(f"Using master regex_template for {token_name}: {master_def['regex_template']}")
-                    
-                    # Special case for description token
-                    if token_name == "description":
-                        updated_token["token_def"]["regex_template"] = ".+?"
-                        print(f"Explicitly setting description token regex_template to: {updated_token['token_def']['regex_template']}")
-                    
-                    updated_tokens.append(updated_token)
-                else:
-                    # If no master definition found, use the original but log a warning
-                    print(f"Warning: No master definition found for token '{token_name}' in FILENAME_TOKENS")
-                    updated_tokens.append(token_cfg)
-        
-        fp_rules['filename_tokens'] = updated_tokens
-        
-        # Force regeneration of regex with updated token definitions
+        fp_rules['filename_tokens'] = self.filename_rule_editor.template_builder.get_template_config()
+        # Ensure regex is generated before saving if user hasn't clicked the button recently
         try:
-            # First update the template builder with the updated token definitions
-            if hasattr(self.filename_rule_editor, 'template_builder'):
-                # Store the current configuration to restore after updating
-                current_config = self.filename_rule_editor.template_builder.get_template_config()
-                
-                # Ensure separators are properly set in the token configs
-                for token_cfg in updated_tokens:
-                    # Find the corresponding token in the template builder
-                    for i, template_token in enumerate(self.filename_rule_editor.template_builder.token_configs):
-                        if template_token.get("name") == token_cfg.get("name"):
-                            # Update the separator in the template builder
-                            separator = token_cfg.get("separator", "")
-                            self.filename_rule_editor.template_builder.token_configs[i]["separator"] = separator
-                
-                # Update regex with the updated token definitions
-                self.filename_rule_editor.update_regex()
-                constructed_regex = self.filename_rule_editor.regex_edit.text()
-                if constructed_regex:
-                    fp_rules['naming_pattern_regex'] = constructed_regex # This is the constructed/validated regex
-                    print(f"Updated regex pattern: {constructed_regex}")
-        except (RuntimeError, AttributeError) as e:
-            print(f"Warning: Error updating regex during save: {e}")
-            # May fail if template builder not ready, but we still want to save the updated tokens
+            self.filename_rule_editor.update_regex()
+            constructed_regex = self.filename_rule_editor.regex_edit.text()
+            if constructed_regex:
+                fp_rules['naming_pattern_regex'] = constructed_regex # This is the constructed/validated regex
+        except (RuntimeError, AttributeError):
+            pass  # May fail if template builder not ready
         fp_rules['severity_naming_pattern'] = self._get_combobox_value(self.rs_severity_combo)
         rules_data['file_paths'] = fp_rules
         
@@ -1279,129 +1207,25 @@ class RulesEditorWidget(QtWidgets.QWidget):
         rules_data['read_file_errors'] = se_rules_read
         
         try:
-            # Save to the current rules_yaml_path
             with open(self.rules_yaml_path, 'w') as f:
                 yaml.dump(rules_data, f, sort_keys=False, indent=2)
             print(f"Rules saved to {self.rules_yaml_path}")
             
-            # Update the current YAML name for display
-            self.current_yaml_name = os.path.basename(self.rules_yaml_path)
-            
             # Notify main window to reload validator rules if rules editor was saved
-            # First try the explicitly stored parent
-            main_window = None
-            if hasattr(self, 'main_window_parent') and self.main_window_parent and hasattr(self.main_window_parent, 'validator'):
-                main_window = self.main_window_parent
-            
-            # If that fails, try the Qt parent hierarchy
-            if not main_window:
-                parent_window = self.parent()
-                temp_parent = parent_window
-                while temp_parent:
-                    if hasattr(temp_parent, 'validator'):
-                        main_window = temp_parent
-                        break
-                    temp_parent = temp_parent.parent()
-                
-            if main_window:
+            parent_window = self.parent()
+            while parent_window and not hasattr(parent_window, 'validator'):
+                parent_window = parent_window.parent()
+            if parent_window and hasattr(parent_window, 'validator'):
                 # Reload validator rules to reflect the changes immediately
-                main_window.validator.set_rules_file_path(self.rules_yaml_path)
-                main_window.statusBar().showMessage(f"Rules saved to {os.path.basename(self.rules_yaml_path)} and validator updated", 3000)
-                
-                # If the parent has a yaml_selector_combo, make sure it's updated to show the current file
-                if hasattr(main_window, 'yaml_selector_combo'):
-                    current_yaml = os.path.basename(self.rules_yaml_path)
-                    idx = main_window.yaml_selector_combo.findText(current_yaml)
-                    if idx >= 0:
-                        main_window.yaml_selector_combo.setCurrentIndex(idx)
-            else:
-                print(f"Warning: Could not find main window with validator attribute. Rules saved to {self.rules_yaml_path} but validator not updated.")
+                parent_window.validator.set_rules_file_path(self.rules_yaml_path)
+                parent_window.statusBar().showMessage(f"Rules saved and validator updated", 3000)
                 
         except Exception as e:
             print(f"Error saving rules to {self.rules_yaml_path}: {e}")
             QtWidgets.QMessageBox.critical(self, "Save Error", f"Could not save rules: {e}")
 
-    def _prepare_filename_tokens_for_editor(self):
-        """
-        Transforms the global FILENAME_TOKENS constant into the list format required by FilenameRuleEditor.
-        This method uses the master list of available tokens (FILENAME_TOKENS constant), not the 'token_definitions'
-        section of the currently loaded rule set YAML. This ensures the editor's palette is always populated
-        with the full set of available tokens regardless of which rule set is loaded.
-        Warnings will be printed if essential UI fields (control, label, options for dropdowns) are missing from FILENAME_TOKENS items.
-        """
-        self.filename_tokens_for_editor = []
-        if not FILENAME_TOKENS: # FILENAME_TOKENS is the global constant
-            print("Warning: Global FILENAME_TOKENS constant is empty. FilenameRuleEditor will have no tokens.")
-            return
-
-        for master_def in FILENAME_TOKENS:
-            if not isinstance(master_def, dict):
-                print(f"Warning: Skipping token definition from master list as it's not a dictionary: {master_def}")
-                continue
-
-            token_name = master_def.get("name")
-            if not token_name:
-                print(f"Warning: Skipping token definition from master list as it's missing a 'name': {master_def}")
-                continue
-
-            # Create a deep copy of the master definition to avoid modifying the original
-            editor_token_def = master_def.copy()
-            
-            # Ensure all required fields are present with defaults if needed
-            if "label" not in editor_token_def:
-                editor_token_def["label"] = f"<{token_name}>"
-            
-            if "regex_template" not in editor_token_def:
-                editor_token_def["regex_template"] = ".+?"
-                
-            # Special handling for description token - always use .+? as the regex_template
-            if token_name == "description":
-                editor_token_def["regex_template"] = ".+?"
-                
-            if "desc" not in editor_token_def:
-                editor_token_def["desc"] = "No description."
-                
-            if "control" not in editor_token_def:
-                editor_token_def["control"] = "static"
-                print(f"Warning: Token '{token_name}' from master list has no 'control' type defined. Defaulting to 'static'.")
-                
-            if "options" not in editor_token_def:
-                editor_token_def["options"] = []
-                
-            # Handle "examples" - FILENAME_TOKENS items might not have this key
-            if "examples" not in editor_token_def:
-                # Use label as a fallback example if "examples" is not in the master definition
-                editor_token_def["examples"] = [editor_token_def.get("label", token_name)]
-
-            # Check derived editor_token_def for conditional requirements
-            if editor_token_def["control"] in ["dropdown", "multiselect"] and not editor_token_def["options"]:
-                print(f"Warning: Token '{token_name}' from master list is '{editor_token_def['control']}' but has no 'options'.")
-                
-            if editor_token_def["control"] == "spinner" and (editor_token_def.get("min") is None or editor_token_def.get("max") is None or editor_token_def.get("default") is None):
-                print(f"Warning: Token '{token_name}' from master list is 'spinner' but is missing 'min', 'max', or 'default'.")
-                
-            if editor_token_def["control"] == "range_spinner" and (editor_token_def.get("min") is None or editor_token_def.get("max") is None or editor_token_def.get("default_min") is None or editor_token_def.get("default_max") is None):
-                print(f"Warning: Token '{token_name}' from master list is 'range_spinner' but is missing 'min', 'max', 'default_min', or 'default_max'.")
-
-            self.filename_tokens_for_editor.append(editor_token_def)
-        
-        if not self.filename_tokens_for_editor:
-            print("Warning: Master list FILENAME_TOKENS resulted in an empty list for FilenameRuleEditor.")
-
-    def load_rules_from_yaml(self, yaml_path=None):
-        """ Loads rules from the specified YAML file and populates the UI elements.
-        
-        Args:
-            yaml_path (str, optional): Path to the YAML file to load. If None, uses self.rules_yaml_path.
-        """
-        # If a specific path is provided, update the current path
-        if yaml_path and os.path.exists(yaml_path):
-            self.rules_yaml_path = yaml_path
-            self.current_yaml_name = os.path.basename(yaml_path)
-            # Update the label to show which file is being edited
-            if hasattr(self, 'current_file_label'):
-                self.current_file_label.setText(f"Editing: {self.current_yaml_name}")
-            
+    def load_rules_from_yaml(self):
+        """ Loads rules from rules.yaml and populates the UI elements. """
         loaded_rules = self._load_yaml_file(self.rules_yaml_path) or {}
         # --- File Paths & Naming ---
         fp_rules = loaded_rules.get('file_paths', {})
@@ -1410,37 +1234,14 @@ class RulesEditorWidget(QtWidgets.QWidget):
         # Load dynamic naming convention parts
         self.filename_rule_editor.regex_edit.setText(fp_rules.get('naming_pattern_regex', ""))
         self.filename_rule_editor.template_builder.clear()
-        # Ensure filename_rule_editor and its template_builder are available
-        if hasattr(self, 'filename_rule_editor') and hasattr(self.filename_rule_editor, 'template_builder'):
-            for token_cfg_from_template in fp_rules.get('filename_tokens', []): # These are the tokens saved as part of a specific template
-                if "name" in token_cfg_from_template:
-                    # Find the full definition of this token from the available tokens for the editor
-                    # First check if there's a master definition in FILENAME_TOKENS
-                    master_def = next((t for t in FILENAME_TOKENS if t["name"] == token_cfg_from_template["name"]), None)
-                    
-                    # If found in master definitions, use that
-                    if master_def:
-                        # Create a copy to avoid modifying the original
-                        full_token_def = master_def.copy()
-                        # Add the token to the template builder using the master definition
-                        self.filename_rule_editor.template_builder.add_token(full_token_def)
-                        # Alias for clarity in the existing logic below
-                        token_cfg = token_cfg_from_template
-                    else:
-                        # Fallback to the editor's token definitions if not found in master
-                        full_token_def = next((t_def for t_def in self.filename_tokens_for_editor if t_def["name"] == token_cfg_from_template["name"]), None)
-                        
-                        if full_token_def:
-                            # Before adding, check if there's a master definition for this token name
-                            # This is a second check to ensure we always use master definitions
-                            master_def = next((t for t in FILENAME_TOKENS if t["name"] == token_cfg_from_template["name"]), None)
-                            if master_def and "regex_template" in master_def:
-                                full_token_def["regex_template"] = master_def["regex_template"]
-                                
-                            # Add the token to the template builder using its full definition
-                            self.filename_rule_editor.template_builder.add_token(full_token_def)
-                            # Alias for clarity in the existing logic below
-                            token_cfg = token_cfg_from_template
+        for token_cfg in fp_rules.get('filename_tokens', []):
+            # Only handle token configurations, not separator configurations
+            # Separators are now handled per-token in the new interface
+            if "name" in token_cfg:
+                # This is a token configuration
+                token = next((t for t in FILENAME_TOKENS if t["name"] == token_cfg["name"]), None)
+                if token:
+                    self.filename_rule_editor.template_builder.add_token(token)
                     
                     # For TableBasedFilenameTemplateBuilder, we need to configure the token differently
                     if hasattr(self.filename_rule_editor.template_builder, 'token_configs'):
@@ -1512,11 +1313,6 @@ class RulesEditorWidget(QtWidgets.QWidget):
                                     idx = widget.separator_combo.findText(separator)
                                     if idx >= 0:
                                         widget.separator_combo.setCurrentIndex(idx)
-                                    else:
-                                        # If the exact separator isn't found, default to "_"
-                                        default_idx = widget.separator_combo.findText("_")
-                                        if default_idx >= 0:
-                                            widget.separator_combo.setCurrentIndex(default_idx)
                                 except (RuntimeError, AttributeError):
                                     pass  # Widget may not exist yet
             # Update regex after adding each token
@@ -1607,7 +1403,7 @@ class RulesEditorWidget(QtWidgets.QWidget):
         self.se_check_read_file_existence_check.setChecked(se_rules_read.get('check_existence', False))
         self._populate_combobox(self.se_severity_read_file_combo, self.dropdown_options.get('severity_options'), se_rules_read.get('severity'))
         
-        print(f"Rules loaded from {self.rules_yaml_path} ({self.current_yaml_name})")
+        print(f"Rules loaded from {self.rules_yaml_path}")
 
     def _on_save_as_new_yaml(self):
         """Save current rules to a new YAML file"""
@@ -1617,35 +1413,18 @@ class RulesEditorWidget(QtWidgets.QWidget):
             # Save current rules to new YAML
             old_path = self.rules_yaml_path
             self.rules_yaml_path = path
-            self.current_yaml_name = os.path.basename(path)
             self.save_rules_to_yaml()
-            
             # Notify parent (main window) about the new YAML file if possible
-            # Try to find the main window parent that has refresh_yaml_selector attribute
-            main_window = None
-            
-            # First try the explicitly stored parent
-            if hasattr(self, 'main_window_parent') and self.main_window_parent and hasattr(self.main_window_parent, 'refresh_yaml_selector'):
-                main_window = self.main_window_parent
-            
-            # If that fails, try the Qt parent hierarchy
-            if not main_window:
-                temp_parent = self.parent()
-                while temp_parent:
-                    if hasattr(temp_parent, 'refresh_yaml_selector'):
-                        main_window = temp_parent
-                        break
-                    temp_parent = temp_parent.parent()
-                
-            if main_window:
-                main_window.refresh_yaml_selector()
+            parent_window = self.parent()
+            while parent_window and not hasattr(parent_window, 'refresh_yaml_selector'):
+                parent_window = parent_window.parent()
+            if parent_window and hasattr(parent_window, 'refresh_yaml_selector'):
+                parent_window.refresh_yaml_selector()
                 # Set the new YAML as selected
                 yaml_name = os.path.basename(path)
-                idx = main_window.yaml_selector_combo.findText(yaml_name)
+                idx = parent_window.yaml_selector_combo.findText(yaml_name)
                 if idx >= 0:
-                    main_window.yaml_selector_combo.setCurrentIndex(idx)
-            else:
-                print(f"Warning: Could not find main window with refresh_yaml_selector attribute. New YAML file saved but selector not updated.")
+                    parent_window.yaml_selector_combo.setCurrentIndex(idx)
 
     def _update_render_settings_ui(self, file_type: str):
         """ Dynamically update UI for render settings based on selected file type. """
@@ -2000,7 +1779,9 @@ The resolved path preview updates live as you edit.<br>
                 self.shot_struct_combo.setCurrentIndex(idx)
             self.update_preview()
 
-    # Debug method removed to resolve AttributeError
+            checkbox.stateChanged.connect(self._on_checkbox_changed)
+            
+        self._update_summary()
 
 class SimpleTokenWidget(QtWidgets.QWidget):
     """
@@ -2242,7 +2023,7 @@ class ValidationResultsTable(QtWidgets.QTableWidget):
         clear_results: Remove all results from the table
         get_selected_rule: Retrieve the currently selected rule name
     """
-    def __init__(self, parent=None, available_tokens=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         
         # Set up table structure
@@ -3035,11 +2816,6 @@ class TableBasedFilenameTemplateBuilder(QtWidgets.QWidget):
                 idx = separator_combo.findText(sep_text)
                 if idx >= 0:
                     separator_combo.setCurrentIndex(idx)
-                else:
-                    # If the exact separator isn't found, default to "_"
-                    default_idx = separator_combo.findText("_")
-                    if default_idx >= 0:
-                        separator_combo.setCurrentIndex(default_idx)
             
             # Column 3: Order buttons
             order_widget = self._create_order_widget(i)
@@ -3143,10 +2919,8 @@ class FilenameRuleEditor(QtWidgets.QWidget):
     This class serves as the primary interface for the filename validation system
     and is used by both the UI module and the backend validator.
     """
-    def __init__(self, parent=None, available_tokens=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.available_tokens = available_tokens if available_tokens is not None else []
-
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
@@ -3158,7 +2932,7 @@ class FilenameRuleEditor(QtWidgets.QWidget):
         palette_layout.setSpacing(4)
         
         # Header
-        header_label = QtWidgets.QLabel("Available Tokens (from YAML):")
+        header_label = QtWidgets.QLabel("Available Tokens:")
         header_label.setStyleSheet("QLabel { color: #e0e0e0; font-weight: bold; font-size: 11px; }")
         palette_layout.addWidget(header_label)
         
@@ -3195,12 +2969,7 @@ class FilenameRuleEditor(QtWidgets.QWidget):
         self.token_buttons = []
         max_cols = 4  # Fewer columns to allow larger buttons
         
-        if not self.available_tokens:
-            no_tokens_label = QtWidgets.QLabel("No tokens available from the master FILENAME_TOKENS list.")
-            no_tokens_label.setStyleSheet("QLabel { color: #ffcc00; font-style: italic; }") # Warning color
-            button_layout.addWidget(no_tokens_label, 0, 0, 1, max_cols) # Span across columns
-
-        for i, token_def in enumerate(self.available_tokens):
+        for i, token_def in enumerate(FILENAME_TOKENS):
             row = i // max_cols
             col = i % max_cols
             
@@ -3457,104 +3226,84 @@ class FilenameRuleEditor(QtWidgets.QWidget):
         included in the regex pattern as alternatives. If no values are selected,
         it falls back to the default regex template.
         """
-        # import re # Already imported globally at the top of the file
-
+        import re
         template_config = self.template_builder.get_template_config()
-        regex_parts = ["^"]  # Start of regex
+        regex_parts = []
         example_parts = []
-
-        for i, token_cfg in enumerate(template_config):
-            token_name = token_cfg.get("name")
-            # Ensure separator is a string, default to empty if not found or None
-            separator = str(token_cfg.get("separator", ""))
-
-            if not token_name:
-                continue
-
-            token_def = token_cfg.get("token_def") # Use the token_def stored in the template config
+        
+        for token_cfg in template_config:
+            token_name = token_cfg["name"]
+            separator = token_cfg.get("separator", "")
+            
+            token_def = next((t for t in FILENAME_TOKENS if t["name"] == token_name), None)
             if not token_def:
-                print(f"Warning: Token definition not found in token_cfg for {token_name} during regex update.")
                 continue
-
-            # Get pattern and example for this token
-            # Pass the full token_cfg which includes user's value/min_value/max_value
-            # Special handling for description token to ensure it always uses the correct pattern
-            if token_name == "description":
-                # Force the token_def to use the correct regex_template
-                token_def_copy = token_def.copy() if token_def else {}
-                token_def_copy["regex_template"] = ".+?"
-                pattern_part, example_part = self._get_token_pattern_and_example(token_def_copy, token_cfg)
-            else:
-                pattern_part, example_part = self._get_token_pattern_and_example(token_def, token_cfg)
-
-            if pattern_part:  # Skip if token is optional and not present
-                regex_parts.append(pattern_part)
-                example_parts.append(example_part)
-
-                # Determine if a separator should be added
-                add_separator_flag = False
-                # Add separator if it's defined, not the last token in the visual template,
-                # and there's at least one subsequent token that will actually produce a regex pattern.
-                if separator and i < len(template_config) - 1:
-                    # Special handling for version and frame_padding tokens
-                    if token_name == "version" and i < len(template_config) - 1:
-                        next_token_cfg = template_config[i + 1]
-                        next_token_name = next_token_cfg.get("name")
-                        # If the next token is frame_padding, use its separator (.) instead of version's separator (_)
-                        if next_token_name == "frame_padding":
-                            separator = next_token_cfg.get("separator", ".")
-                    
-                    # Check if any subsequent token will produce a pattern
-                    for next_token_idx in range(i + 1, len(template_config)):
-                        next_token_cfg = template_config[next_token_idx]
-                        next_token_name = next_token_cfg.get("name")
-                        if not next_token_name:
-                            continue
-                        
-                        # Use the token_def from the template config if available
-                        next_token_def = next_token_cfg.get("token_def")
-                        if not next_token_def:
-                            # Fallback to FILENAME_TOKENS if not in template config
-                            next_token_def = next((t for t in FILENAME_TOKENS if t["name"] == next_token_name), None)
-                        
-                        if next_token_def:
-                            # Check if this next token would actually contribute to the regex
-                            next_pattern_part, _ = self._get_token_pattern_and_example(next_token_def, next_token_cfg)
-                            if next_pattern_part:
-                                add_separator_flag = True
-                                break
                 
-                if add_separator_flag:
-                    regex_parts.append(re.escape(separator))
-                    example_parts.append(separator)
-
-        regex_parts.append("$")  # End of regex
+            if token_def["control"] == "range_spinner":
+                min_val = token_cfg.get("min_value", token_def.get("default_min", 2))
+                max_val = token_cfg.get("max_value", token_def.get("default_max", 4))
+                regex = token_def["regex_template"].replace("MIN_VAL", str(min_val)).replace("MAX_VAL", str(max_val))
+                
+                if token_def["name"] == "sequence":
+                    # For sequence tokens, show an example with the minimum length
+                    example = "A" * min_val
+                else:
+                    example = f"({min_val}-{max_val})"
+            elif token_def["control"] == "spinner":
+                n = token_cfg.get("value") or token_def.get("default", 4)
+                # Special handling for regex templates with quantifiers
+                if "{n}" in token_def["regex_template"]:
+                    regex = token_def["regex_template"].replace("{n}", str(n))
+                else:
+                    # Handle cases where the template might be using \d{n} format
+                    # Ensure proper quantifier syntax with curly braces
+                    regex = token_def["regex_template"].replace("n", str(n))
+                example = "0" * n
+            elif token_def["control"] == "dropdown":
+                val = token_cfg.get("value")
+                if val and val != "none":
+                    regex = f"({val})"
+                    example = val
+                else:
+                    regex = token_def["regex_template"]
+                    example = token_def["options"][0] if token_def["options"] else ""
+            elif token_def["control"] == "multiselect":
+                # Handle multiselect specially - get list of selected values
+                selected_values = token_cfg.get("value", [])
+                
+                if selected_values and isinstance(selected_values, list) and len(selected_values) > 0:
+                    # Create alternation pattern with selected values only
+                    alternation = "|".join(selected_values)
+                    regex = f"({alternation})"
+                    # Use first selected value as example
+                    example = selected_values[0]
+                else:
+                    # Fall back to regex template if no selections
+                    regex = token_def["regex_template"]
+                    example = token_def["options"][0] if token_def["options"] else ""
+            else:
+                regex = token_def["regex_template"]
+                example = "demo"
+            
+            regex_parts.append(regex)
+            example_parts.append(str(example))
+            
+            if separator:
+                # Ensure separators (especially periods) are properly escaped in the regex
+                escaped_separator = re.escape(separator)
+                regex_parts.append(escaped_separator)
+                example_parts.append(separator)
+                
+        # Join all regex parts
+        regex_str = "^" + "".join(regex_parts) + "$"
         
-        raw_regex_str = "".join(regex_parts)
+        # Fix any quantifiers that might not have proper syntax (e.g., \d4 -> \d{4})
+        # This matches \d followed by digits not in curly braces
+        import re
+        regex_str = re.sub(r'\\d(\d+)(?!\})', r'\\d{\1}', regex_str)
         
-        # Normalize regex quantifiers like \d4 to \d{4} and [A-Za-z]4 to [A-Za-z]{4}
-        # This ensures consistency if any token_def["regex_template"] was written with \d4 instead of \d{4}.
-        # It finds \d or character class followed by one or more digits, NOT followed by a }.
-        # Example: \d4 -> \d{4}, [A-Za-z]4 -> [A-Za-z]{4}, but \d{4} -> \d{4} (no change).
-        final_regex_str = re.sub(r'\\d(\d+)(?!\})', r'\\d{\1}', raw_regex_str)
-        final_regex_str = re.sub(r'(\[[^\]]+\])(\d+)(?!\})', r'\1{\2}', final_regex_str)
-
-        self.regex_edit.setText(final_regex_str)
+        self.regex_edit.setText(regex_str)
         self.example_edit.setText("".join(example_parts))
-
-        # Validate the generated regex and update the status icon
-        try:
-            re.compile(final_regex_str)
-            # Assuming QtGui is available from `from PySide6 import QtGui`
-            if hasattr(self, 'regex_status_icon') and self.regex_status_icon:
-                 self.regex_status_icon.setPixmap(QtGui.QPixmap("icons/success.png"))
-        except re.error:
-            if hasattr(self, 'regex_status_icon') and self.regex_status_icon:
-                self.regex_status_icon.setPixmap(QtGui.QPixmap("icons/error.png"))
-        except AttributeError:
-            # This might happen if regex_status_icon is not yet fully initialized,
-            # though it should be by the time this method is called.
-            pass
 
     def save_template(self):
         """Save the current template configuration"""
@@ -3644,29 +3393,7 @@ class FilenameRuleEditor(QtWidgets.QWidget):
             for config in template_config:
                 if "name" in config and "token_def" in config:
                     # This is a token
-                    token_name = config["name"]
-                    
-                    # Check if there's a master definition in FILENAME_TOKENS
-                    master_def = next((t for t in FILENAME_TOKENS if t["name"] == token_name), None)
-                    
-                    if master_def:
-                        # Use the master definition but preserve the loaded token_def's structure
-                        token_def = config["token_def"].copy()
-                        
-                        # ALWAYS ensure we're using the master regex_template
-                        if "regex_template" in master_def:
-                            token_def["regex_template"] = master_def["regex_template"]
-                            print(f"Using master regex_template for {token_name} during template load: {master_def['regex_template']}")
-                        
-                        # Special case for description token
-                        if token_name == "description":
-                            token_def["regex_template"] = ".+?"
-                            print(f"Explicitly setting description token regex_template to: {token_def['regex_template']} during template load")
-                    else:
-                        # If no master definition found, use the original but log a warning
-                        token_def = config["token_def"]
-                        print(f"Warning: No master definition found for token '{token_name}' in FILENAME_TOKENS during template load")
-                    
+                    token_def = config["token_def"]
                     self.template_builder.add_token(token_def)
                     
                     # Set the token value if provided
@@ -3694,6 +3421,8 @@ class FilenameRuleEditor(QtWidgets.QWidget):
                 "Error Loading Template",
                 f"Failed to load template: {str(e)}"
             )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Load Error", f"Failed to load template:\n{e}")
 
     def _on_regex_edit(self):
         """Validate and apply the manually edited regex, updating the status icon and showing errors if invalid."""
@@ -3742,27 +3471,10 @@ class FilenameRuleEditor(QtWidgets.QWidget):
             token_name = token_cfg["name"]
             separator = token_cfg.get("separator", "")
             
-            # Find token definition from the token_cfg itself
-            token_def = token_cfg.get("token_def")
+            # Find token definition
+            token_def = next((t for t in FILENAME_TOKENS if t["name"] == token_name), None)
             if not token_def:
-                print(f"Warning: Token definition not found in token_cfg for {token_name} during validation.")
                 continue
-            
-            # Check if there's a master definition in FILENAME_TOKENS
-            master_def = next((t for t in FILENAME_TOKENS if t["name"] == token_name), None)
-            
-            # If master definition exists, use its regex_template
-            if master_def and "regex_template" in master_def:
-                # Create a copy to avoid modifying the original
-                token_def_copy = token_def.copy()
-                token_def_copy["regex_template"] = master_def["regex_template"]
-                
-                # Special case for description token
-                if token_name == "description":
-                    token_def_copy["regex_template"] = ".+?"
-                
-                # Use the updated token_def with master regex_template
-                token_def = token_def_copy
                 
             try:
                 # Generate expected pattern for this token
@@ -3796,117 +3508,79 @@ class FilenameRuleEditor(QtWidgets.QWidget):
         return errors
     
     def _get_token_pattern_and_example(self, token_def, token_cfg):
-        """
-        Generate regex pattern and example for a specific token, primarily using token_def["regex_template"]
-        and substituting values from token_cfg where appropriate.
-        token_def comes from the YAML's 'token_definitions' (via self.available_tokens).
-        token_cfg comes from the template builder's current state for that token instance.
-        """
+        """Generate regex pattern and example for a specific token"""
         token_name = token_def["name"]
         
-        # First, check if there's a master definition in FILENAME_TOKENS
-        master_def = next((t for t in FILENAME_TOKENS if t["name"] == token_name), None)
-        
-        # ALWAYS use the regex_template from the master definition if available
-        if master_def and "regex_template" in master_def:
-            # For description token, always use the explicit ".+?" pattern
-            if token_name == "description":
-                pattern = ".+?"  # Explicitly set to the correct pattern
-                print(f"Using explicit pattern for description token: {pattern}")
+        if token_def["control"] == "range_spinner":
+            # For range spinner control (min and max values)
+            min_val = token_cfg.get("min_value", token_def.get("default_min", 2))
+            max_val = token_cfg.get("max_value", token_def.get("default_max", 4))
+            if token_name == "sequence":
+                pattern = f"[A-Za-z]{{{min_val},{max_val}}}"
+                example = "A" * min_val
             else:
-                # For all other tokens, always use the master definition
-                pattern = master_def["regex_template"]
-                
-            # Log the pattern being used for debugging
-            print(f"Using pattern for {token_name}: {pattern} (from master definition)")
-        else:
-            # Fallback to the token_def from the template builder
-            pattern = token_def.get("regex_template", ".+?") # Default to match anything if template is missing
-            
-        example_options = token_def.get("examples", [])
-        example = example_options[0] if example_options else token_name # Default example
-        
-        # Store the separator for use in the pattern and example
-        separator = token_cfg.get("separator", "")
-
-        control_type = token_def.get("control")
-        user_value = token_cfg.get("value") # Value from the UI for this token instance
-
-        if control_type == "range_spinner":
-            min_val = token_cfg.get("min_value", token_def.get("default_min", token_def.get("min", 1)))
-            max_val = token_cfg.get("max_value", token_def.get("default_max", token_def.get("max", 10)))
-            # Ensure min_val and max_val are integers for formatting
-            try:
-                min_val = int(min_val)
-                max_val = int(max_val)
-            except (ValueError, TypeError):
-                min_val, max_val = 1, 10 # Fallback
-            
-            pattern = pattern.replace("MIN_VAL", str(min_val)).replace("MAX_VAL", str(max_val))
-            # If regex_template was like '[A-Za-z]{MIN_VAL,MAX_VAL}', example should reflect that
-            if "[A-Za-z]" in pattern or "[a-zA-Z]" in pattern : example = "A" * min_val
-            elif "\\d" in pattern : example = "0" * min_val
-            else: example = f"({min_val}-{max_val} chars)"
-
-        elif control_type == "spinner":
-            n = user_value if user_value is not None else token_def.get("default", 4)
-            try:
-                n = int(n)
-            except (ValueError, TypeError):
-                n = 4 # Fallback
-            pattern = pattern.replace("{n}", str(n))
-            if "\\d" in pattern: example = "0" * n
-            elif "[A-Za-z]" in pattern or "[a-zA-Z]" in pattern: example = "A" * n
-            else: example = f"({n} chars)"
-
-        elif control_type == "dropdown":
-            # If regex_template is meant to be dynamic based on selection (e.g. "(?:(LL180|LL360))?" )
-            # and user_value is one of the options, we might want to make the pattern specific.
-            # However, to keep it simple and rely on YAML, we assume regex_template is either
-            # a group of options, or the user_value itself if it's not "none".
-            if user_value and user_value != "none" and user_value in token_def.get("options", []):
-                # If the regex_template is a generic placeholder like ".+?" or specific like "(LL180|LL360)"
-                # and the user selected a specific value, use the specific value.
-                # This assumes the YAML's regex_template for dropdowns is either specific or a group.
-                # If it's a group like (LL180|LL360), we let it be. If it's like ".+?", then escape.
-                if pattern == ".+?": # A generic placeholder, make it specific
-                     pattern = re.escape(user_value)
-                # If pattern is already (LL180|LL360) and user_value is LL180, we could make it just LL180
-                # For now, if user_value is not "none", it implies it should be present.
-                # The regex_template from YAML should handle optionality correctly (e.g. using (?:...)? )
-                example = user_value
-            elif user_value == "none" and "(?:" in pattern and ")?" in pattern: # Optional token, and "none" selected
-                pattern = "" # Make it effectively optional by providing an empty pattern part
-                example = "(optional)"
-            # else, use the regex_template as is (e.g., if it's already an OR group of options)
-            # and the first example from YAML.
-
-        elif control_type == "multiselect":
-            selected_options = user_value if isinstance(user_value, list) and user_value else []
-            if selected_options:
-                # Use the selected options to form the pattern part, overriding generic regex_template
-                # Add a dot before extension if this is the extension token
-                if token_name == "extension":
-                    pattern = f"({'|'.join(re.escape(opt) for opt in selected_options)})"
+                pattern = token_def["regex_template"].replace("MIN_VAL", str(min_val)).replace("MAX_VAL", str(max_val))
+                example = f"({min_val}-{max_val} chars)"
+        elif token_def["control"] == "spinner":
+            n = token_cfg.get("value", token_def.get("default", 4))
+            if token_name == "shotNumber":
+                pattern = f"\\d{{{n}}}"
+                example = "0" * n
+            else:
+                # Special handling for regex templates with quantifiers
+                if "{n}" in token_def["regex_template"]:
+                    pattern = token_def["regex_template"].replace("{n}", str(n))
                 else:
-                    pattern = f"({'|'.join(re.escape(opt) for opt in selected_options)})"
-                example = selected_options[0]
-            elif not selected_options and token_def.get("options"): # No selection, but options exist
-                 # Fallback to a pattern matching any of the defined options if regex_template is too generic
-                if pattern == ".+?": # Generic placeholder
-                    all_defined_options = [re.escape(opt) for opt in token_def.get("options", [])]
-                    if all_defined_options:
-                        if token_name == "extension":
-                            pattern = f"(\\.({'|'.join(all_defined_options)}))"
-                        else:
-                            pattern = f"({'|'.join(all_defined_options)})"
-                example = f"({token_def.get('options',[example_options])[0]})"
-
-            # If no options selected and no predefined options, regex_template from YAML is used as is.
-
-        # For "static" or other control types, the regex_template from YAML is used directly.
-        # The example is also taken from YAML.
-
+                    # Handle cases where the template might be using \d{n} format
+                    pattern = token_def["regex_template"].replace("n", str(n))
+                example = f"({n} chars)"
+                
+        elif token_def["control"] == "dropdown":
+            val = token_cfg.get("value")
+            if token_name == "pixelMappingName" and (not val or val == "none"):
+                pattern = ""  # Optional token
+                example = "(optional)"
+            elif val and val != "none":
+                pattern = re.escape(val)
+                example = val
+            else:
+                # Use first option as example
+                options = token_def.get("options", [])
+                if options:
+                    pattern = f"({'|'.join(re.escape(opt) for opt in options if opt != 'none')})"
+                    example = options[0] if options[0] != "none" else (options[1] if len(options) > 1 else "value")
+                else:
+                    pattern = token_def["regex_template"]
+                    example = "value"
+                    
+        elif token_def["control"] == "multiselect":
+            val = token_cfg.get("value", [])
+            if val and isinstance(val, list) and len(val) > 0:
+                escaped_values = [re.escape(v) for v in val]
+                pattern = f"({'|'.join(escaped_values)})"
+                example = val[0]
+            else:
+                options = token_def.get("options", [])
+                if options:
+                    escaped_options = [re.escape(opt) for opt in options]
+                    pattern = f"({'|'.join(escaped_options)})"
+                    example = f"one of: {', '.join(options[:3])}{'...' if len(options) > 3 else ''}"
+                else:
+                    pattern = token_def["regex_template"]
+                    example = "value"
+                    
+        else:  # static tokens
+            pattern = token_def["regex_template"]
+            if token_name == "version":
+                example = "v001 or v010"
+            elif token_name == "frame_padding":
+                example = "%08d or #### (frame padding)"
+            elif token_name == "resolution":
+                example = "2k, 4k, HD_1080, etc."
+            else:
+                examples = token_def.get("examples", [])
+                example = examples[0] if examples else "value"
+                
         return pattern, example
     
     def _generate_token_error(self, token_def, token_cfg, remaining_filename, expected_pattern, example):
@@ -4688,3 +4362,4 @@ class CompactFilenameTemplateBuilder(QtWidgets.QWidget):
         for i, widget in enumerate(self.token_widgets):
             row = i // self.grid_columns
             col = i % self.grid_columns
+    # ... rest of existing methods stay the same ...

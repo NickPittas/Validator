@@ -1,7 +1,7 @@
 file_paths:
   relative_path_required: false
   severity_relative_path: warning
-  filename_template: ^[A-Za-z]{3,4}\d{4}_.+?_(?:(LL180|LL360))?\d{1,2}[kK]_(r709g24|sRGBg22|acescglin)_(2997|5994|24|25|30|50|60)_v\d{2,3}\.(?:%0[4-8]d|#{4,8})\.(exr)$
+  filename_template: ^[A-Za-z]{3,4}_\d{4}_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_v\d{2,3}_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*\.(?:%0[4-8]d|#{4,8})\.(exr)$
   filename_tokens:
   - name: sequence
     token_def:
@@ -15,7 +15,7 @@ file_paths:
       default_max: 4
       desc: Upper/lowercase sequence abbreviation (min 2 letters)
     value: null
-    separator: ''
+    separator: _
   - name: shotNumber
     token_def:
       name: shotNumber
@@ -29,71 +29,20 @@ file_paths:
     value: null
     separator: _
   - name: description
-    token_def:
+    token_def: &id001
       name: description
       label: <description>
-      regex_template: .+?
+      regex_template: '[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*'
       control: static
       desc: Description (letters, numbers, hyphens)
     value: null
     separator: _
-  - name: pixelMappingName
-    token_def:
-      name: pixelMappingName
-      label: <pixelMappingName>
-      regex_template: (?:(LL180|LL360))?
-      control: dropdown
-      options:
-      - LL180
-      - LL360
-      - none
-      desc: Pixel mapping name (optional)
-    value: null
-    separator: ''
-  - name: resolution
-    token_def:
-      name: resolution
-      label: <resolution>
-      regex_template: \d{1,2}[kK]
-      control: static
-      desc: Resolution abbreviation (e.g., 1k, 4k)
+  - name: description
+    token_def: *id001
     value: null
     separator: _
-  - name: colorspaceGamma
-    token_def:
-      name: colorspaceGamma
-      label: <colorspaceGamma>
-      regex_template: (r709|sRGB|acescg|ap0|ap1|p3|rec2020)(lin|log|g22|g24|g26)
-      control: multiselect
-      options:
-      - r709g24
-      - sRGBg22
-      - acescglin
-      - ap0lin
-      - ap1g22
-      - p3g26
-      - rec2020lin
-      desc: Colorspace and gamma (multi-select)
-    value:
-    - r709g24
-    - sRGBg22
-    - acescglin
-    separator: _
-  - name: fps
-    token_def:
-      name: fps
-      label: <fps>
-      regex_template: (2997|5994|24|25|30|50|60)
-      control: dropdown
-      options:
-      - '2997'
-      - '5994'
-      - '24'
-      - '25'
-      - '30'
-      - '50'
-      - '60'
-      desc: Frames per second
+  - name: description
+    token_def: *id001
     value: null
     separator: _
   - name: version
@@ -103,6 +52,10 @@ file_paths:
       regex_template: v\d{2,3}
       control: static
       desc: Version (v + 2-3 digits)
+    value: null
+    separator: _
+  - name: description
+    token_def: *id001
     value: null
     separator: .
   - name: frame_padding
@@ -132,8 +85,8 @@ file_paths:
       desc: File extension (multi-select)
     value:
     - exr
-    separator: ''
-  naming_pattern_regex: ^[A-Za-z]{3,4}\d{4}_.+?_(?:(LL180|LL360))?\d{1,2}[kK]_(r709g24|sRGBg22|acescglin)_(2997|5994|24|25|30|50|60)_v\d{2,3}\.(?:%0[4-8]d|#{4,8})\.(exr)$
+    separator: _
+  naming_pattern_regex: ^[A-Za-z]{3,4}_\d{4}_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_v\d{2,3}_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*\.(?:%0[4-8]d|#{4,8})\.(exr)$
   severity_naming_pattern: warning
 path_rules:
   base_path: V:\KennyChesney_TheSphere_2025-02-06
@@ -144,50 +97,40 @@ path_rules:
     <resolution>: 12K
     <version>: v113
 frame_range:
-  check_consistency: true
-  check_missing_frames: true
-  check_rate_consistency: true
+  check_consistency: false
+  check_missing_frames: false
+  check_rate_consistency: false
   default_fps: 24.0
   severity: warning
 node_integrity:
   check_disabled_nodes: false
   severity_disabled_nodes: warning
 write_node_resolution:
-  severity: warning
   allowed_formats:
   - 12K
+  severity: error
 colorspaces:
   Read:
-    severity: warning
     allowed:
-    - default (sRGB)
-    - default (scene_linear)
-    - sRGB
-    - rec709
-    - linear
     - ACES - ACEScg
-    - default (ACES - ACEScg)
-    - scene_linear (ACES - ACEScg)
-    - compositing_linear (ACES - ACEScg)
-    - rendering (ACES - ACEScg)
+    - scene_linear
     - Input - sRGB
     - Input - Rec.709
     - Output - sRGB
     - Output - Rec.709
-  Write:
     severity: warning
+  Write:
     allowed:
-    - default (ACES - ACEScg)
-    - scene_linear (ACES - ACEScg)
-    - compositing_linear (ACES - ACEScg)
-    - rendering (ACES - ACEScg)
-    - Output - sRGB
+    - ACES - ACEScg
     - Output - Rec.709
+    - Output - sRGB
+    - default (scene_linear)
+    severity: warning
 channels:
   require_rgba: false
   warn_on_rgb_only: false
   warn_on_extra_channels: false
-  severity: error
+  severity: info
 render_settings:
   Write:
     file_type_rules:
@@ -199,7 +142,7 @@ render_settings:
     severity: warning
 versioning:
   require_version_token: true
-  version_token_regex: _v(\d+)
+  version_token_regex: _v(\d{3})
   severity_require_token: error
 viewer_nodes:
   warn_if_ip_active: true

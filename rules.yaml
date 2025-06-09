@@ -2,50 +2,135 @@ file_paths:
   version: 1.0
   relative_path_required: false
   severity_relative_path: warning
-  naming_pattern_regex: ^[A-Z]4_\d4_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_(?:LL180)_\d{1,2}k_(r709g24|sRGBg22|acescglin|ap0lin|ap1g22|p3g26|rec2020lin)_(2997)_v\d{2,3}_(?:%\d{2}d|#{4,8}|\d{4,8})_(jpg|jpeg|exr)_$
+  naming_pattern_regex: ^[A-Za-z]4\d4_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_(?:(LL180|LL360))?\d{1,2}k_(r709|sRGB|acescg|ap0|ap1|p3|rec2020)(lin|log|g22|g24|g26)_(2997|5994|24|25|30|50|60)_v\d{2,3}_(?:%0[4-8]d|#{4,8})\.(?i:jpg|jpeg|png|mxf|mov|exr)$
   severity_naming_pattern: warning
-  filename_template: ^[A-Z]4_\d4_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_(?:LL180)_\d{1,2}k_(r709g24|sRGBg22|acescglin|ap0lin|ap1g22|p3g26|rec2020lin)_(2997)_v\d{2,3}_(?:%\d{2}d|#{4,8}|\d{4,8})_(jpg|jpeg|exr)_$
+  filename_template: ^[A-Za-z]{3,4}\d{4}_[a-zA-Z0-9]+(?:[-a-zA-Z0-9]+)*_(?:(LL180|LL360))?\d{1,2}k_(r709|sRGB|acescg|ap0|ap1|p3|rec2020)(lin|log|g22|g24|g26)_(2997|5994|24|25|30|50|60)_v\d{2,3}\.(?:%0[4-8]d|#{4,8})\.(?i:jpg|jpeg|png|mxf|mov|exr)$
   filename_tokens:
   - name: sequence
-    value: 4
-    separator: _
+    token_def:
+      name: sequence
+      label: <sequence>
+      regex_template: '[A-Za-z]{n}'
+      control: spinner
+      min: 2
+      max: 8
+      default: 4
+      desc: Uppercase sequence abbreviation
+    value: null
+    separator: ''
   - name: shotNumber
-    value: 4
+    token_def:
+      name: shotNumber
+      label: <shotNumber>
+      regex_template: \d{n}
+      control: spinner
+      min: 2
+      max: 8
+      default: 4
+      desc: Shot number (digits)
+    value: null
     separator: _
   - name: description
+    token_def:
+      name: description
+      label: <description>
+      regex_template: '.+?'
+      control: static
+      desc: Description (letters, numbers, hyphens)
     value: null
     separator: _
   - name: pixelMappingName
-    value: LL180
-    separator: _
+    token_def:
+      name: pixelMappingName
+      label: <pixelMappingName>
+      regex_template: (?:(LL180|LL360))?
+      control: dropdown
+      options:
+      - LL180
+      - LL360
+      - none
+      desc: Pixel mapping name (optional)
+    value: null
+    separator: ''
   - name: resolution
+    token_def:
+      name: resolution
+      label: <resolution>
+      regex_template: \d{1,2}k
+      control: static
+      desc: Resolution abbreviation (e.g., 1k, 4k)
     value: null
     separator: _
   - name: colorspaceGamma
-    value:
-    - r709g24
-    - sRGBg22
-    - acescglin
-    - ap0lin
-    - ap1g22
-    - p3g26
-    - rec2020lin
+    token_def:
+      name: colorspaceGamma
+      label: <colorspaceGamma>
+      regex_template: (r709|sRGB|acescg|ap0|ap1|p3|rec2020)(lin|log|g22|g24|g26)
+      control: multiselect
+      options:
+      - r709g24
+      - sRGBg22
+      - acescglin
+      - ap0lin
+      - ap1g22
+      - p3g26
+      - rec2020lin
+      desc: Colorspace and gamma (multi-select)
+    value: null
     separator: _
   - name: fps
-    value: '2997'
+    token_def:
+      name: fps
+      label: <fps>
+      regex_template: (2997|5994|24|25|30|50|60)
+      control: dropdown
+      options:
+      - '2997'
+      - '5994'
+      - '24'
+      - '25'
+      - '30'
+      - '50'
+      - '60'
+      desc: Frames per second
+    value: null
     separator: _
   - name: version
+    token_def:
+      name: version
+      label: <version>
+      regex_template: v\d{2,3}
+      control: static
+      desc: Version (v + 2-3 digits)
     value: null
     separator: _
   - name: frame_padding
+    token_def:
+      name: frame_padding
+      label: <frame_padding>
+      regex_template: (?:%0[4-8]d|#{4,8})
+      control: static
+      desc: 'Frame padding (%04d to %08d, #### to ########)'
     value: null
-    separator: _
+    separator: .
   - name: extension
-    value:
-    - jpg
-    - jpeg
-    - exr
-    separator: _
+    token_def:
+      name: extension
+      label: <extension>
+      regex_template: (?i:jpg|jpeg|png|mxf|mov|exr)
+      control: multiselect
+      options:
+      - jpg
+      - jpeg
+      - png
+      - mxf
+      - mov
+      - exr
+      - tiff
+      - dpx
+      desc: File extension (multi-select)
+    value: null
+    separator: ''
 frame_range:
   version: 1.0
   severity: warning
